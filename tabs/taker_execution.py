@@ -7,37 +7,46 @@ from datafetch.s3_fetch import load_s3_trades_data
 from constants import ALL_MARKET_NAMES
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.constants.spot_markets import mainnet_spot_market_configs
-from datafetch.user_records import get_user_orders
+from datafetch.user_records import get_user_orders, get_user_order_actions
+from datafetch.transaction_fetch import get_slot_for_tx
 
-async def process_taker_data(selected_market, start_date, end_date):
-    print("processing taker data for", selected_market, start_date, end_date)
-    all_trades_for_range_df = get_trades_for_range_pandas(selected_market, start_date, end_date)
+async def getSlot():
+    tx_sig = '28nwj4mKK2M7YxmK12fK24k7U6mcuurSHaN2cC5pxPqiwtXsU9ruyuFGT2XvVSnrVDzGV8xRojQKAm9U5RjqgfwQ'
     
-    # grab all unique/deduped taker pubkeys from the taker column
-    unique_taker_pubkeys = all_trades_for_range_df['taker'].unique()
+    try:
+        slot = await get_slot_for_tx(tx_sig)
+        print(f"Transaction {tx_sig} was included in slot {slot}")
+        return slot
+    except Exception as e:
+        print(f"Error getting slot for transaction: {str(e)}")
+
+async def process_taker_data(taker_pubkey, selected_market, start_date, end_date):
+    print("processing taker data for", taker_pubkey, selected_market, start_date, end_date)
+
     
     # Convert date objects to pandas datetime for comparison
     start_datetime = pd.to_datetime(start_date)
     end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)  # End of the day
     
-    # for each taker pubkey, grab all orders
-    for taker_pubkey in unique_taker_pubkeys:
-        pages_max = 130
-        if pages_max is not None:
-            print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
-        # returns a df
-        all_taker_orders = get_user_orders(taker_pubkey, 'perp', selected_market, pages_max=pages_max)
-        # filter for "lastActionStatus": "filled"
-        all_taker_orders = all_taker_orders[all_taker_orders['lastActionStatus'] == 'filled']
-        print("new row count after filled filter:", len(all_taker_orders))
-        
-        # filter ts according to start_date and end_date
-        all_taker_orders = all_taker_orders[(all_taker_orders['ts'] >= start_datetime) & 
-                                           (all_taker_orders['ts'] <= end_datetime)]
-        print("new row count after date filter:", len(all_taker_orders))
-        if pages_max is not None:
-            print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
-        return all_taker_orders #TODO: handle in a way where we move this outside of the loop
+    pages_max = 15
+    if pages_max is not None:
+        print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
+    # returns a df
+    all_taker_orders = get_user_orders(taker_pubkey, 'perp', selected_market, pages_max=pages_max)
+    # filter for "lastActionStatus": "filled"
+    # all_taker_orders = all_taker_orders[all_taker_orders['lastActionStatus'] == 'filled']
+    print("new row count after filled filter:", len(all_taker_orders))
+    
+    # filter ts according to start_date and end_date
+    all_taker_orders = all_taker_orders[(all_taker_orders['ts'] >= start_datetime) & 
+                                        (all_taker_orders['ts'] <= end_datetime)]
+    print("new row count after date filter:", len(all_taker_orders))
+    
+    if pages_max is not None:
+        print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
+    
+    #TODO: handle in a way where we move this outside of the loop
+    return all_taker_orders
     
 
 
@@ -63,6 +72,9 @@ async def taker_execution_analysis(clearing_house: DriftClient):
         if spot not in markets:
             markets.append(spot)
             
+    # taker pubkey input
+    taker_pubkey = st.text_input("Taker pubkey", value="CemQRxNFqjfYzrzf4ese2VcSqHjcgTXSdutHepMJGec3")
+            
     selected_market = market_symbol0.selectbox(
         "Market symbol", 
         markets, 
@@ -85,26 +97,59 @@ async def taker_execution_analysis(clearing_house: DriftClient):
         max_value=latest_date,
     )
     
+    # Add order ID input for fetching order actions
+    order_id = st.text_input("Order ID", value="161")
+    
+    # Create two columns for the buttons
+    col1, col2, col3 = st.columns(3)
+    
     # Fetch data button
-    if st.button("Fetch Data"):
+    if col1.button("Fetch Orders"):
         with st.spinner(f"Fetching trade data for {selected_market} from {start_date} to {end_date}..."):
             try:
                 # Fetch trade data using the API without page parameter to get all data
                 #TODO: filter out bad orders like no taker value/reverted fills?
-                trades_df = await process_taker_data(selected_market, start_date, end_date)
+                taker_df = await process_taker_data(taker_pubkey, selected_market, start_date, end_date)
                 
-                if trades_df.empty:
+                if taker_df.empty:
                     st.warning(f"No trade data found for {selected_market} in the selected date range.")
                     return
                 
                 # Display basic info
-                st.success(f"Fetched {len(trades_df)} trades for {selected_market}")
+                st.success(f"Fetched {len(taker_df)} taker orders for {selected_market}")
                 
                 # Display the data in a table
-                st.subheader("Trade Data")
-                st.dataframe(trades_df)
-                
+                st.subheader("Taker Data")
+                st.dataframe(taker_df)
             
             except Exception as e:
                 st.error(f"Error: {str(e)}")
                 st.info("Try selecting a different date range or market where data is available.")
+    
+    # Fetch order actions button            
+    if col2.button("Fetch Order Actions"):
+        with st.spinner(f"Fetching actions for order ID {order_id}..."):
+            try:
+                # Fetch order actions
+                actions_df = get_user_order_actions(taker_pubkey, order_id)
+                
+                if actions_df.empty:
+                    st.warning(f"No actions found for order ID {order_id}.")
+                    return
+                
+                # Display basic info
+                st.success(f"Fetched {len(actions_df)} actions for order ID {order_id}")
+                
+                # Display the data in a table
+                st.subheader("Order Actions")
+                st.dataframe(actions_df)
+            
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                st.info("Try checking if the order ID exists for this user.")
+                
+    # Get slot button
+    if col3.button("Get Slot"):
+        with st.spinner("Getting slot..."):
+            slot = await getSlot()
+            st.success(f"Slot: {slot}")
