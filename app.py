@@ -47,6 +47,7 @@ from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.vamm import vamm
 from tabs.vaults import vaults
+from tabs.taker_execution import taker_execution_analysis
 
 # import ssl
 # import urllib.request
@@ -123,6 +124,7 @@ def main():
         "MM (legacy)",
         "Liquidation Calculator",
         "Amplify Stats",
+        "Taker-Execution",
     )
 
     to_remove = [
@@ -365,6 +367,9 @@ def main():
     elif tab.lower() == "amplify stats":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_amplify_stats(clearing_house))
+    elif tab.lower() == "taker-execution":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(taker_execution_analysis(clearing_house))
     hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
