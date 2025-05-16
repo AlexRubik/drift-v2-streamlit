@@ -248,3 +248,84 @@ def get_user_orders(user_public_key: str, market_filter: str, symbol: str, pages
 # def get_user_liquidations(user_public_key: Pubkey, start_date: date, end_date: date) -> pd.DataFrame:
 #     # Assuming liquidations are less frequent, might need different handling or endpoint structure
 #     return _fetch_user_records("liquidations", user_public_key, start_date, end_date)
+
+
+def get_user_order_actions(user_public_key: str, order_id: str):
+    """
+    Fetches all actions for a specific order ID of a user.
+    
+    Args:
+        user_public_key: The public key of the user account
+        order_id: The ID of the order to fetch actions for
+        
+    Returns:
+        DataFrame containing all actions for the specified order
+    """
+    print(f"Fetching order actions for user {user_public_key}, order ID {order_id}...")
+    
+    all_records = []
+    next_page_token = None
+    page_count = 1
+    
+    while True:
+        try:
+            url = f"{URL_PREFIX}/user/{user_public_key}/orders/{order_id}/actions"
+            params = {}
+            
+            # Add the next page token if we have one
+            if next_page_token:
+                params["page"] = next_page_token
+            
+            response = requests.get(url, params=params)
+            
+            # Handle potential 404 for users with no orders
+            if response.status_code == 404:
+                print(f"No order actions found for user {user_public_key}, order ID {order_id} (404).")
+                break
+                
+            response.raise_for_status()  # Raise for other errors (5xx, 4xx)
+            json_data = response.json()
+            
+            records = json_data.get("records", [])
+            meta = json_data.get("meta", {})
+            
+            if not records:
+                print(f"No more order action records found for order ID {order_id}.")
+                break
+                
+            all_records.extend(records)
+            print(f"Fetched page {page_count} with {len(records)} order action records.")
+            
+            # Get the next page token from the meta data
+            next_page_token = meta.get("nextPage")
+            if next_page_token is None:
+                print(f"Reached end of order action records for order ID {order_id}.")
+                break
+                
+            page_count += 1
+            time.sleep(0.1)  # Be nice to the API
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching order action data: {e}")
+            break
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            break
+    
+    if not all_records:
+        print(f"No order action records found for user {user_public_key}, order ID {order_id}.")
+        return pd.DataFrame()
+        
+    # Convert to DataFrame
+    df = pd.DataFrame(all_records)
+    
+    # Convert timestamp columns to datetime
+    if 'ts' in df.columns:
+        df['ts'] = pd.to_datetime(df['ts'], unit='s')
+    
+    # Sort by timestamp (newest first)
+    if 'ts' in df.columns:
+        df = df.sort_values('ts', ascending=False).reset_index(drop=True)
+    
+    print(f"Finished fetching order actions. Total records: {len(df)}")
+    return df
