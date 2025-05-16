@@ -159,6 +159,91 @@ def get_user_funding(
     return _fetch_user_records("funding", str(user_public_key), start_date, end_date)
 
 
+def get_user_orders(user_public_key: str, market_filter: str, symbol: str, pages_max: int = None):
+    """
+    Fetches order records for a specific user and market.
+    
+    Args:
+        user_public_key: The public key of the user account
+        market_filter: The market type ('spot', 'perp', or 'prediction')
+        symbol: The market symbol (e.g., 'SOL-PERP', 'SOL')
+        
+    Returns:
+        DataFrame containing order records sorted by lastUpdatedTs
+    """
+    print(f"Fetching orders for {user_public_key} in {market_filter} market {symbol}...")
+    
+    all_records = []
+    next_page_token = None
+    page_count = 1
+    
+    
+    while pages_max is None or page_count < pages_max:
+        try:
+            url = f"{URL_PREFIX}/user/{user_public_key}/orders/{market_filter}/{symbol}"
+            params = {}
+            
+            # Add the next page token if we have one
+            if next_page_token:
+                params["page"] = next_page_token
+            
+            response = requests.get(url, params=params)
+            
+            # Handle potential 404 for users with no orders
+            if response.status_code == 404:
+                print(f"No order data found for {user_public_key} in {market_filter} market {symbol} (404).")
+                break
+                
+            response.raise_for_status()  # Raise for other errors (5xx, 4xx)
+            json_data = response.json()
+            
+            records = json_data.get("records", [])
+            meta = json_data.get("meta", {})
+            
+            if not records:
+                print(f"No more order records found for {user_public_key}.")
+                break
+                
+            all_records.extend(records)
+            print(f"Fetched page {page_count} with {len(records)} order records.")
+            
+            # Get the next page token from the meta data
+            next_page_token = meta.get("nextPage")
+            if next_page_token is None:
+                print(f"Reached end of order records for {user_public_key}.")
+                break
+                
+            page_count += 1
+            time.sleep(0.1)  # Be nice to the API
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching order data: {e}")
+            break
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            break
+    
+    if not all_records:
+        print(f"No order records found for {user_public_key} in {market_filter} market {symbol}.")
+        return pd.DataFrame()
+        
+    # Convert to DataFrame
+    df = pd.DataFrame(all_records)
+    
+    # Convert timestamp columns to datetime
+    timestamp_columns = ['ts', 'maxTs', 'lastUpdatedTs']
+    for col in timestamp_columns:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], unit='s')
+    
+    # Sort by lastUpdatedTs (newest first)
+    if 'ts' in df.columns:
+        df = df.sort_values('ts', ascending=False).reset_index(drop=True)
+    
+    print(f"Finished fetching orders. Total records: {len(df)}")
+    return df
+
+
 # @cache_data(ttl=60 * 15)
 # def get_user_liquidations(user_public_key: Pubkey, start_date: date, end_date: date) -> pd.DataFrame:
 #     # Assuming liquidations are less frequent, might need different handling or endpoint structure
