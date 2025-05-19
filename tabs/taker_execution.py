@@ -7,7 +7,7 @@ from datafetch.s3_fetch import load_s3_trades_data
 from constants import ALL_MARKET_NAMES
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.constants.spot_markets import mainnet_spot_market_configs
-from datafetch.user_records import get_user_orders, get_user_order_actions
+from datafetch.user_records import get_user_orders, get_user_order_actions, get_user_orders_and_actions
 from datafetch.transaction_fetch import get_slot_for_tx
 
 async def getSlot():
@@ -23,31 +23,57 @@ async def getSlot():
 async def process_taker_data(taker_pubkey, selected_market, start_date, end_date):
     print("processing taker data for", taker_pubkey, selected_market, start_date, end_date)
 
-    
     # Convert date objects to pandas datetime for comparison
     start_datetime = pd.to_datetime(start_date)
     end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)  # End of the day
     
-    pages_max = 15
+    pages_max = 20
     if pages_max is not None:
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
-    # returns a df
-    all_taker_orders = get_user_orders(taker_pubkey, 'perp', selected_market, pages_max=pages_max)
-    # filter for "lastActionStatus": "filled"
-    # all_taker_orders = all_taker_orders[all_taker_orders['lastActionStatus'] == 'filled']
-    print("new row count after filled filter:", len(all_taker_orders))
     
-    # filter ts according to start_date and end_date
-    all_taker_orders = all_taker_orders[(all_taker_orders['ts'] >= start_datetime) & 
-                                        (all_taker_orders['ts'] <= end_datetime)]
-    print("new row count after date filter:", len(all_taker_orders))
+    # Get orders, actions, and joined data
+    orders_df, actions_df, all_taker_orders_and_actions, auction_slot_diff_orders_df = get_user_orders_and_actions(
+        taker_pubkey, 
+        'perp', 
+        selected_market, 
+        pages_max=pages_max, 
+        auction_orders_only=True,
+        last_action_status='filled',
+        order_type=None,
+        exclude_liquidations=True
+    )
+    
+    # Filter by date range using the appropriate timestamp column
+    # For the joined dataframe, we need to use the timestamp from the order part
+    if not all_taker_orders_and_actions.empty:
+        # Check which timestamp column exists in the joined dataframe
+        ts_column = 'ts_order' if 'ts_order' in all_taker_orders_and_actions.columns else 'ts'
+        
+        # Filter by date
+        all_taker_orders_and_actions = all_taker_orders_and_actions[
+            (all_taker_orders_and_actions[ts_column] >= start_datetime) & 
+            (all_taker_orders_and_actions[ts_column] <= end_datetime)
+        ]
+        print("new row count after date filter:", len(all_taker_orders_and_actions))
     
     if pages_max is not None:
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
     
     #TODO: handle in a way where we move this outside of the loop
-    return all_taker_orders
-    
+    return orders_df, actions_df, all_taker_orders_and_actions, auction_slot_diff_orders_df
+
+
+
+def slot_stats(orders_with_slot_diff_df):
+    # mean, median, min, max, quantile
+    slot_diff = orders_with_slot_diff_df['auctionSlotDiff']
+    mean_slot_diff = slot_diff.mean()
+    median_slot_diff = slot_diff.median()
+    min_slot_diff = slot_diff.min()
+    max_slot_diff = slot_diff.max()
+    q1_slot_diff = slot_diff.quantile(0.25) # Q1
+    q3_slot_diff = slot_diff.quantile(0.75) # Q3
+    return mean_slot_diff, median_slot_diff, min_slot_diff, max_slot_diff, q1_slot_diff, q3_slot_diff
 
 
 async def taker_execution_analysis(clearing_house: DriftClient):
@@ -105,11 +131,11 @@ async def taker_execution_analysis(clearing_house: DriftClient):
     
     # Fetch data button
     if col1.button("Fetch Orders"):
-        with st.spinner(f"Fetching trade data for {selected_market} from {start_date} to {end_date}..."):
+        with st.spinner(f"Fetching orders and actions data for {selected_market} from {start_date} to {end_date}..."):
             try:
                 # Fetch trade data using the API without page parameter to get all data
                 #TODO: filter out bad orders like no taker value/reverted fills?
-                taker_df = await process_taker_data(taker_pubkey, selected_market, start_date, end_date)
+                orders_df, actions_df, taker_df, auction_slot_diff_orders_df = await process_taker_data(taker_pubkey, selected_market, start_date, end_date)
                 
                 if taker_df.empty:
                     st.warning(f"No trade data found for {selected_market} in the selected date range.")
@@ -118,8 +144,16 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 # Display basic info
                 st.success(f"Fetched {len(taker_df)} taker orders for {selected_market}")
                 
+                st.subheader("Orders with Auction Slot Diff")
+                st.dataframe(auction_slot_diff_orders_df)
+                mean_slot_diff, median_slot_diff, min_slot_diff, max_slot_diff, q1_slot_diff, q3_slot_diff = slot_stats(auction_slot_diff_orders_df)
+                # slot diff header
+                st.write("Slot Diff Stats")
+                # round to int
+                st.write(f"Mean: {int(mean_slot_diff)}, Median: {int(median_slot_diff)}, Min: {int(min_slot_diff)}, Max: {int(max_slot_diff)}, Q1: {int(q1_slot_diff)}, Q3: {int(q3_slot_diff)}")
+                
                 # Display the data in a table
-                st.subheader("Taker Data")
+                st.subheader("Orders joined with actions")
                 st.dataframe(taker_df)
             
             except Exception as e:

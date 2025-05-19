@@ -159,7 +159,16 @@ def get_user_funding(
     return _fetch_user_records("funding", str(user_public_key), start_date, end_date)
 
 
-def get_user_orders(user_public_key: str, market_filter: str, symbol: str, pages_max: int = None):
+def get_user_orders(
+    user_public_key: str, 
+    market_filter: str, 
+    symbol: str, 
+    pages_max: int = None, 
+    auction_orders_only: bool = False,
+    last_action_status: str = None,
+    order_type: str = None,
+    exclude_liquidations: bool = False
+):
     """
     Fetches order records for a specific user and market.
     
@@ -167,6 +176,11 @@ def get_user_orders(user_public_key: str, market_filter: str, symbol: str, pages
         user_public_key: The public key of the user account
         market_filter: The market type ('spot', 'perp', or 'prediction')
         symbol: The market symbol (e.g., 'SOL-PERP', 'SOL')
+        pages_max: Maximum number of pages to fetch (None for all pages)
+        auction_orders_only: If True, returns only auction orders (postOnly=False)
+        last_action_status: Filter for specific lastActionStatus (e.g., 'filled', 'canceled')
+        order_type: Filter for specific order type (e.g., 'limit', 'market', 'oracle')
+        exclude_liquidations: If True, excludes orders with lastActionExplanation='liquidation'
         
     Returns:
         DataFrame containing order records sorted by lastUpdatedTs
@@ -178,7 +192,7 @@ def get_user_orders(user_public_key: str, market_filter: str, symbol: str, pages
     page_count = 1
     
     
-    while pages_max is None or page_count < pages_max:
+    while pages_max is None or page_count <= pages_max:
         try:
             url = f"{URL_PREFIX}/user/{user_public_key}/orders/{market_filter}/{symbol}"
             params = {}
@@ -230,6 +244,61 @@ def get_user_orders(user_public_key: str, market_filter: str, symbol: str, pages
     # Convert to DataFrame
     df = pd.DataFrame(all_records)
     
+    # Log order type counts before filtering
+    if 'orderType' in df.columns:
+        order_type_counts = df['orderType'].value_counts()
+        print("\nOrder type distribution before filtering:")
+        for ot, count in order_type_counts.items():
+            print(f"  {ot}: {count} orders")
+    
+    # Log lastActionStatus counts before filtering
+    if 'lastActionStatus' in df.columns:
+        status_counts = df['lastActionStatus'].value_counts()
+        print("\nOrder status distribution before filtering:")
+        for status, count in status_counts.items():
+            print(f"  {status}: {count} orders")
+    
+    # Log lastActionExplanation counts before filtering
+    if 'lastActionExplanation' in df.columns:
+        explanation_counts = df['lastActionExplanation'].value_counts()
+        print("\nOrder explanation distribution before filtering:")
+        for explanation, count in explanation_counts.items():
+            print(f"  {explanation}: {count} orders")
+    
+    # Log postOnly counts before filtering
+    if 'postOnly' in df.columns:
+        postonly_counts = df['postOnly'].value_counts()
+        print("\nPost-only distribution before filtering:")
+        for is_postonly, count in postonly_counts.items():
+            label = "Post-only" if is_postonly else "Auction"
+            print(f"  {label}: {count} orders")
+    
+    # Apply filters
+    original_count = len(df)
+    
+    # Filter for auction orders only if requested
+    if auction_orders_only and 'postOnly' in df.columns:
+        df = df[df['postOnly'] == False]
+        print(f"\nFiltered for auction orders only: {original_count} -> {len(df)}")
+        original_count = len(df)
+    
+    # Filter by lastActionStatus if specified
+    if last_action_status and 'lastActionStatus' in df.columns:
+        df = df[df['lastActionStatus'] == last_action_status]
+        print(f"Filtered for lastActionStatus={last_action_status}: {original_count} -> {len(df)}")
+        original_count = len(df)
+    
+    # Filter by order type if specified
+    if order_type and 'orderType' in df.columns:
+        df = df[df['orderType'] == order_type]
+        print(f"Filtered for orderType={order_type}: {original_count} -> {len(df)}")
+        original_count = len(df)
+    
+    # Exclude liquidations if requested
+    if exclude_liquidations and 'lastActionExplanation' in df.columns:
+        df = df[df['lastActionExplanation'] != 'liquidation']
+        print(f"Excluded liquidation orders: {original_count} -> {len(df)}")
+    
     # Convert timestamp columns to datetime
     timestamp_columns = ['ts', 'maxTs', 'lastUpdatedTs']
     for col in timestamp_columns:
@@ -240,7 +309,7 @@ def get_user_orders(user_public_key: str, market_filter: str, symbol: str, pages
     if 'ts' in df.columns:
         df = df.sort_values('ts', ascending=False).reset_index(drop=True)
     
-    print(f"Finished fetching orders. Total records: {len(df)}")
+    print(f"\nFinished fetching orders. Total records after filtering: {len(df)}")
     return df
 
 
@@ -329,3 +398,175 @@ def get_user_order_actions(user_public_key: str, order_id: str):
     
     print(f"Finished fetching order actions. Total records: {len(df)}")
     return df
+
+
+def calculate_auction_slot_diff(actions_df, order_id):
+    """
+    Calculate the slot difference between placing an order and its final fill.
+    
+    Args:
+        actions_df: DataFrame containing order actions
+        order_id: The order ID to calculate slot difference for
+        
+    Returns:
+        The slot difference (final fill slot - place slot) or None if not found
+    """
+    # Filter actions for this specific order
+    order_actions = actions_df[actions_df['orderId'] == order_id]
+    
+    if order_actions.empty:
+        return None
+    
+    # Get the place order slot
+    place_actions = order_actions[order_actions['action'] == 'place']
+    if place_actions.empty:
+        return None
+    
+    place_slot = place_actions.iloc[0]['slot']
+    
+    # Get all fill actions for this order
+    fill_actions = order_actions[order_actions['action'] == 'fill']
+    if fill_actions.empty:
+        return None
+    
+    # Find the final fill where takerOrderBaseAssetAmount equals takerOrderCumulativeBaseAssetAmountFilled
+    # or makerOrderBaseAssetAmount equals makerOrderCumulativeBaseAssetAmountFilled
+    final_fills = fill_actions[
+        (fill_actions['takerOrderBaseAssetAmount'] == fill_actions['takerOrderCumulativeBaseAssetAmountFilled']) |
+        (fill_actions['makerOrderBaseAssetAmount'] == fill_actions['makerOrderCumulativeBaseAssetAmountFilled'])
+    ]
+    
+    if final_fills.empty:
+        return None
+    
+    # Get the slot number for the final fill
+    final_fill_slot = final_fills.iloc[0]['slot']
+    
+    # Calculate the absolute difference
+    slot_diff = abs(final_fill_slot - place_slot)
+    
+    return slot_diff
+
+def get_user_orders_and_actions(
+    user_public_key: str, 
+    market_filter: str, 
+    symbol: str, 
+    pages_max: int = None, 
+    auction_orders_only: bool = False,
+    last_action_status: str = None,
+    order_type: str = None,
+    exclude_liquidations: bool = False
+):
+    """
+    Fetches order records for a specific user and market, along with all actions for those orders.
+    
+    Args:
+        user_public_key: The public key of the user account
+        market_filter: The market type ('spot', 'perp', or 'prediction')
+        symbol: The market symbol (e.g., 'SOL-PERP', 'SOL')
+        pages_max: Maximum number of pages to fetch (None for all pages)
+        auction_orders_only: If True, returns only auction orders (postOnly=False)
+        last_action_status: Filter for specific lastActionStatus (e.g., 'filled', 'canceled')
+        order_type: Filter for specific order type (e.g., 'limit', 'market', 'oracle')
+        exclude_liquidations: If True, excludes orders with lastActionExplanation='liquidation'
+        
+    Returns:
+        Tuple containing four DataFrames:
+        - orders_df: DataFrame with order records
+        - actions_df: DataFrame with all actions for all orders
+        - joined_df: DataFrame with orders joined with their actions
+        - auction_slot_diff_df: DataFrame with orders and their auction slot differences
+    """
+    print(f"Fetching orders and actions for {user_public_key} in {market_filter} market {symbol}...")
+    
+    # First, get all orders using the existing function
+    orders_df = get_user_orders(
+        user_public_key=user_public_key,
+        market_filter=market_filter,
+        symbol=symbol,
+        pages_max=pages_max,
+        auction_orders_only=auction_orders_only,
+        last_action_status=last_action_status,
+        order_type=order_type,
+        exclude_liquidations=exclude_liquidations
+    )
+    
+    if orders_df.empty:
+        print(f"No orders found for {user_public_key} in {market_filter} market {symbol}.")
+        # Return empty DataFrame for the auction_slot_diff_df as well
+        return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    
+    # Get the list of order IDs
+    order_ids = orders_df['orderId'].astype(str).tolist()
+    print(f"Found {len(order_ids)} orders. Fetching actions for each order...")
+    
+    # Fetch actions for each order
+    all_actions = []
+    for order_id in order_ids:
+        try:
+            # Get actions for this order
+            order_actions_df = get_user_order_actions(user_public_key, order_id)
+            
+            if not order_actions_df.empty:
+                # Add the orderId as a column for joining later
+                order_actions_df['orderId'] = order_id
+                all_actions.append(order_actions_df)
+                print(f"Fetched {len(order_actions_df)} actions for order ID {order_id}")
+            else:
+                print(f"No actions found for order ID {order_id}")
+                
+            # Be nice to the API
+            time.sleep(0.1)
+            
+        except Exception as e:
+            print(f"Error fetching actions for order ID {order_id}: {e}")
+    
+    # Combine all actions into a single DataFrame
+    if all_actions:
+        actions_df = pd.concat(all_actions, ignore_index=True)
+        print(f"Total actions fetched: {len(actions_df)}")
+        
+        # Create a joined DataFrame
+        # Convert orderId to string in both DataFrames to ensure proper joining
+        orders_df['orderId'] = orders_df['orderId'].astype(str)
+        actions_df['orderId'] = actions_df['orderId'].astype(str)
+        
+        # Join the DataFrames
+        joined_df = pd.merge(
+            orders_df,
+            actions_df,
+            on='orderId',
+            how='left',
+            suffixes=('_order', '_action')
+        )
+        
+        print(f"Created joined DataFrame with {len(joined_df)} rows")
+        
+        # Calculate auction slot difference for each order
+        print("Calculating auction slot differences...")
+        slot_diffs = []
+        for order_id in order_ids:
+            slot_diff = calculate_auction_slot_diff(actions_df, order_id)
+            slot_diffs.append({
+                'orderId': order_id,
+                'auctionSlotDiff': slot_diff
+            })
+        
+        # Create a new DataFrame with the slot differences
+        auction_slot_diff_df = pd.DataFrame(slot_diffs)
+        
+        # Merge with the orders DataFrame to create the final result
+        auction_slot_diff_df = pd.merge(
+            orders_df,
+            auction_slot_diff_df,
+            on='orderId',
+            how='left'
+        )
+        
+        print(f"Created auction slot difference DataFrame with {len(auction_slot_diff_df)} rows")
+        
+        return orders_df, actions_df, joined_df, auction_slot_diff_df
+    else:
+        print("No actions found for any orders")
+        # Return empty DataFrame for the auction_slot_diff_df as well
+        return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()

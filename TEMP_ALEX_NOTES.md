@@ -42,6 +42,11 @@ https://data.api.drift.trade/market/SOL-PERP/trades/2025/05/16
 https://data.api.drift.trade/user/GGbgZLcBWDKP1Trhh5vzs9hX3TxDFZPt3oaJRnKwVeB6/trades/2025/05
 https://data.api.drift.trade/user/GGbgZLcBWDKP1Trhh5vzs9hX3TxDFZPt3oaJRnKwVeB6/orders/perp/SOL-PERP
 
+References:
+https://docs.drift.trade/about-v2/jit-maker-faq
+
+To avoid having an auction, users can set the post-only flag.
+
 
 Order Record:
 
