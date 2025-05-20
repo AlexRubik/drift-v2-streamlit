@@ -20,8 +20,10 @@ async def getSlot():
     except Exception as e:
         print(f"Error getting slot for transaction: {str(e)}")
 
-async def process_taker_data(taker_pubkey, selected_market, start_date, end_date):
+async def process_taker_data(taker_pubkey, selected_market, start_date, end_date, order_type=None):
     print("processing taker data for", taker_pubkey, selected_market, start_date, end_date)
+    if order_type:
+        print(f"Filtering for order type: {order_type}")
 
     # Convert date objects to pandas datetime for comparison
     start_datetime = pd.to_datetime(start_date)
@@ -32,35 +34,34 @@ async def process_taker_data(taker_pubkey, selected_market, start_date, end_date
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
     
     # Get orders, actions, and joined data
-    orders_df, actions_df, all_taker_orders_and_actions, auction_slot_diff_orders_df = get_user_orders_and_actions(
+    orders_df, actions_df, joined_orders_and_actions_df, auction_slot_diff_orders_df = get_user_orders_and_actions(
         taker_pubkey, 
         'perp', 
         selected_market, 
         pages_max=pages_max, 
         auction_orders_only=True,
         last_action_status='filled',
-        order_type=None,
+        order_type=order_type,
         exclude_liquidations=True
     )
     
     # Filter by date range using the appropriate timestamp column
     # For the joined dataframe, we need to use the timestamp from the order part
-    if not all_taker_orders_and_actions.empty:
+    if not joined_orders_and_actions_df.empty:
         # Check which timestamp column exists in the joined dataframe
-        ts_column = 'ts_order' if 'ts_order' in all_taker_orders_and_actions.columns else 'ts'
+        ts_column = 'ts_order' if 'ts_order' in joined_orders_and_actions_df.columns else 'ts'
         
         # Filter by date
-        all_taker_orders_and_actions = all_taker_orders_and_actions[
-            (all_taker_orders_and_actions[ts_column] >= start_datetime) & 
-            (all_taker_orders_and_actions[ts_column] <= end_datetime)
+        joined_orders_and_actions_df = joined_orders_and_actions_df[
+            (joined_orders_and_actions_df[ts_column] >= start_datetime) & 
+            (joined_orders_and_actions_df[ts_column] <= end_datetime)
         ]
-        print("new row count after date filter:", len(all_taker_orders_and_actions))
+        print("new row count after date filter:", len(joined_orders_and_actions_df))
     
     if pages_max is not None:
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
     
-    #TODO: handle in a way where we move this outside of the loop
-    return orders_df, actions_df, all_taker_orders_and_actions, auction_slot_diff_orders_df
+    return orders_df, actions_df, joined_orders_and_actions_df, auction_slot_diff_orders_df
 
 
 
@@ -99,7 +100,7 @@ async def taker_execution_analysis(clearing_house: DriftClient):
             markets.append(spot)
             
     # taker pubkey input
-    taker_pubkey = st.text_input("Taker pubkey", value="CemQRxNFqjfYzrzf4ese2VcSqHjcgTXSdutHepMJGec3")
+    taker_pubkey = st.text_input("Taker pubkey", value="48TRXHqSoBUYTRUvPyPorZQPiNSdAQEg8J6b7Kepmbzh")
             
     selected_market = market_symbol0.selectbox(
         "Market symbol", 
@@ -123,10 +124,17 @@ async def taker_execution_analysis(clearing_house: DriftClient):
         max_value=latest_date,
     )
     
-    # Add order ID input for fetching order actions
-    order_id = st.text_input("Order ID", value="161")
+    # Add order type filter
+    order_types = ["All", "limit", "market", "oracle", "triggerLimit", "triggerMarket"]
+    selected_order_type = st.selectbox("Order Type", order_types, index=0)
     
-    # Create two columns for the buttons
+    # Convert "All" to None for the filter
+    order_type_filter = None if selected_order_type == "All" else selected_order_type
+    
+    # Add order ID input for fetching order actions
+    order_id = st.text_input("Order ID (only used for fetching order actions)", value="20775")
+    
+    # Create columns for the buttons
     col1, col2, col3 = st.columns(3)
     
     # Fetch data button
@@ -134,8 +142,13 @@ async def taker_execution_analysis(clearing_house: DriftClient):
         with st.spinner(f"Fetching orders and actions data for {selected_market} from {start_date} to {end_date}..."):
             try:
                 # Fetch trade data using the API without page parameter to get all data
-                #TODO: filter out bad orders like no taker value/reverted fills?
-                orders_df, actions_df, taker_df, auction_slot_diff_orders_df = await process_taker_data(taker_pubkey, selected_market, start_date, end_date)
+                orders_df, actions_df, taker_df, auction_slot_diff_orders_df = await process_taker_data(
+                    taker_pubkey, 
+                    selected_market, 
+                    start_date, 
+                    end_date,
+                    order_type=order_type_filter  # Pass the order type filter
+                )
                 
                 if taker_df.empty:
                     st.warning(f"No trade data found for {selected_market} in the selected date range.")
@@ -146,11 +159,15 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 
                 st.subheader("Orders with Auction Slot Diff")
                 st.dataframe(auction_slot_diff_orders_df)
-                mean_slot_diff, median_slot_diff, min_slot_diff, max_slot_diff, q1_slot_diff, q3_slot_diff = slot_stats(auction_slot_diff_orders_df)
-                # slot diff header
-                st.write("Slot Diff Stats")
-                # round to int
-                st.write(f"Mean: {int(mean_slot_diff)}, Median: {int(median_slot_diff)}, Min: {int(min_slot_diff)}, Max: {int(max_slot_diff)}, Q1: {int(q1_slot_diff)}, Q3: {int(q3_slot_diff)}")
+                
+                if not auction_slot_diff_orders_df.empty:
+                    mean_slot_diff, median_slot_diff, min_slot_diff, max_slot_diff, q1_slot_diff, q3_slot_diff = slot_stats(auction_slot_diff_orders_df)
+                    # slot diff header
+                    st.write("Slot Diff Stats")
+                    # round to int
+                    st.write(f"Mean: {int(mean_slot_diff)}, Median: {int(median_slot_diff)}, Min: {int(min_slot_diff)}, Max: {int(max_slot_diff)}, Q1: {int(q1_slot_diff)}, Q3: {int(q3_slot_diff)}")
+                else:
+                    st.info("No orders with auction slot diff data available.")
                 
                 # Display the data in a table
                 st.subheader("Orders joined with actions")
