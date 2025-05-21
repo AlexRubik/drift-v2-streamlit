@@ -29,7 +29,7 @@ async def process_taker_data(taker_pubkey, selected_market, start_date, end_date
     start_datetime = pd.to_datetime(start_date)
     end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)  # End of the day
     
-    pages_max = 20
+    pages_max = 15
     if pages_max is not None:
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
     
@@ -39,7 +39,7 @@ async def process_taker_data(taker_pubkey, selected_market, start_date, end_date
         'perp', 
         selected_market, 
         pages_max=pages_max, 
-        auction_orders_only=True,
+        post_only=False, # To avoid having an auction, users can set the post-only flag.
         last_action_status='filled',
         order_type=order_type,
         exclude_liquidations=True

@@ -164,7 +164,7 @@ def get_user_orders(
     market_filter: str, 
     symbol: str, 
     pages_max: int = None, 
-    auction_orders_only: bool = False,
+    post_only: bool = False,
     last_action_status: str = None,
     order_type: str = None,
     exclude_liquidations: bool = False
@@ -177,7 +177,7 @@ def get_user_orders(
         market_filter: The market type ('spot', 'perp', or 'prediction')
         symbol: The market symbol (e.g., 'SOL-PERP', 'SOL')
         pages_max: Maximum number of pages to fetch (None for all pages)
-        auction_orders_only: If True, returns only auction orders (postOnly=False)
+        post_only: If True, returns only orders that requested post-only (postOnly=True)
         last_action_status: Filter for specific lastActionStatus (e.g., 'filled', 'canceled')
         order_type: Filter for specific order type (e.g., 'limit', 'market', 'oracle')
         exclude_liquidations: If True, excludes orders with lastActionExplanation='liquidation'
@@ -277,7 +277,8 @@ def get_user_orders(
     original_count = len(df)
     
     # Filter for auction orders only if requested
-    if auction_orders_only and 'postOnly' in df.columns:
+    # To avoid having an auction, users can set the post-only flag.
+    if not post_only and 'postOnly' in df.columns:
         df = df[df['postOnly'] == False]
         print(f"\nFiltered for auction orders only: {original_count} -> {len(df)}")
         original_count = len(df)
@@ -430,10 +431,8 @@ def calculate_auction_slot_diff(actions_df, order_id):
         return None
     
     # Find the final fill where takerOrderBaseAssetAmount equals takerOrderCumulativeBaseAssetAmountFilled
-    # or makerOrderBaseAssetAmount equals makerOrderCumulativeBaseAssetAmountFilled
     final_fills = fill_actions[
-        (fill_actions['takerOrderBaseAssetAmount'] == fill_actions['takerOrderCumulativeBaseAssetAmountFilled']) |
-        (fill_actions['makerOrderBaseAssetAmount'] == fill_actions['makerOrderCumulativeBaseAssetAmountFilled'])
+        (fill_actions['takerOrderBaseAssetAmount'] == fill_actions['takerOrderCumulativeBaseAssetAmountFilled'])
     ]
     
     if final_fills.empty:
@@ -452,7 +451,7 @@ def get_user_orders_and_actions(
     market_filter: str, 
     symbol: str, 
     pages_max: int = None, 
-    auction_orders_only: bool = False,
+    post_only: bool = False,
     last_action_status: str = None,
     order_type: str = None,
     exclude_liquidations: bool = False
@@ -465,7 +464,7 @@ def get_user_orders_and_actions(
         market_filter: The market type ('spot', 'perp', or 'prediction')
         symbol: The market symbol (e.g., 'SOL-PERP', 'SOL')
         pages_max: Maximum number of pages to fetch (None for all pages)
-        auction_orders_only: If True, returns only auction orders (postOnly=False)
+        post_only: If True, returns only orders that requested post-only (postOnly=True)
         last_action_status: Filter for specific lastActionStatus (e.g., 'filled', 'canceled')
         order_type: Filter for specific order type (e.g., 'limit', 'market', 'oracle')
         exclude_liquidations: If True, excludes orders with lastActionExplanation='liquidation'
@@ -485,7 +484,7 @@ def get_user_orders_and_actions(
         market_filter=market_filter,
         symbol=symbol,
         pages_max=pages_max,
-        auction_orders_only=auction_orders_only,
+        post_only=post_only,
         last_action_status=last_action_status,
         order_type=order_type,
         exclude_liquidations=exclude_liquidations
