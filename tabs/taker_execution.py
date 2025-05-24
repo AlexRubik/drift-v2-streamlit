@@ -165,9 +165,6 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 st.subheader("Orders with Auction Slot Diff")
                 st.dataframe(auction_slot_diff_orders_df)
                 
-                st.subheader("Auction Metrics")
-                st.dataframe(auction_metrics_df)
-                
                 if not auction_slot_diff_orders_df.empty:
                     mean_slot_diff, median_slot_diff, min_slot_diff, max_slot_diff, q1_slot_diff, q3_slot_diff = slot_stats(auction_slot_diff_orders_df)
                     # slot diff header
@@ -176,6 +173,10 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                     st.write(f"Mean: {int(mean_slot_diff)}, Median: {int(median_slot_diff)}, Min: {int(min_slot_diff)}, Max: {int(max_slot_diff)}, Q1: {int(q1_slot_diff)}, Q3: {int(q3_slot_diff)}")
                 else:
                     st.info("No orders with auction slot diff data available.")
+                
+                st.subheader("Auction Metrics")
+                st.dataframe(auction_metrics_df)
+                
                 
                 # TODO: output doesn't look right, need to fix
                 # st.subheader("Orders joined with actions")
