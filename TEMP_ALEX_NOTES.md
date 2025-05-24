@@ -2,9 +2,9 @@
 
 ### Ideally should include:
 ### - compare place order auction start/end vs the fill record price
-Wrote get_user_orders in user_records.py for this
+init done
 ### - determine the place in the dutch auction (0 -> auction_duration) that the order filled
-Compare using slots.
+init done
 ### - the fill price vs oracle
 Refer to how this is done in tradeflow.py, see comments below.
 Also, will need to join trade and order data if we want to simplify the page to use one df because order data is missing oracle price. Otherwise we can just copy tradeflow.py's implementation of price vs oracle.
@@ -12,6 +12,12 @@ Also, will need to join trade and order data if we want to simplify the page to 
 
    -------------------   
 ### Comments
+
+TODO:
+- account for oracle records that use price offset?
+- more aggregate stats
+
+-----------------
 If we want ALL auction data and not a specified user's data only.
 
 For auction data, you can grab all trades with get_trades_for_range_pandas in api_fetch.py. We do this because we want to grab active accounts in our date range and there is no "get active users in range" endpoint. Use the taker pubkey (user's drift pda aka accountId) from the trade data to fetch the account's orders with get_user_orders I wrote in user_records.py. get_user_orders will give us all of a user's orders (there is no way to filter on date range) that have auction data.
