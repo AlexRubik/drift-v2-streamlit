@@ -1,5 +1,6 @@
 import time
 from datetime import date, datetime
+from typing import Union, List
 
 import pandas as pd
 import requests
@@ -166,7 +167,7 @@ def get_user_orders(
     pages_max: int = None, 
     post_only: bool = False,
     last_action_status: str = None,
-    order_type: str = None,
+    order_type: Union[str, List[str]] = None,
     exclude_liquidations: bool = False
 ):
     """
@@ -291,8 +292,12 @@ def get_user_orders(
     
     # Filter by order type if specified
     if order_type and 'orderType' in df.columns:
-        df = df[df['orderType'] == order_type]
-        print(f"Filtered for orderType={order_type}: {original_count} -> {len(df)}")
+        if isinstance(order_type, list):
+            df = df[df['orderType'].isin(order_type)]
+            print(f"Filtered for orderTypes={order_type}: {original_count} -> {len(df)}")
+        else:
+            df = df[df['orderType'] == order_type]
+            print(f"Filtered for orderType={order_type}: {original_count} -> {len(df)}")
         original_count = len(df)
     
     # Exclude liquidations if requested
@@ -432,7 +437,8 @@ def calculate_auction_slot_diff(actions_df, order_id):
     
     # Find the final fill where takerOrderBaseAssetAmount equals takerOrderCumulativeBaseAssetAmountFilled
     final_fills = fill_actions[
-        (fill_actions['takerOrderBaseAssetAmount'] == fill_actions['takerOrderCumulativeBaseAssetAmountFilled'])
+        (fill_actions['takerOrderBaseAssetAmount'] == fill_actions['takerOrderCumulativeBaseAssetAmountFilled']) |
+        (fill_actions['makerOrderBaseAssetAmount'] == fill_actions['makerOrderCumulativeBaseAssetAmountFilled'])
     ]
     
     if final_fills.empty:
@@ -453,8 +459,9 @@ def get_user_orders_and_actions(
     pages_max: int = None, 
     post_only: bool = False,
     last_action_status: str = None,
-    order_type: str = None,
-    exclude_liquidations: bool = False
+    order_type: Union[str, List[str]] = None,
+    exclude_liquidations: bool = False,
+    auction_orders_only: bool = False
 ):
     """
     Fetches order records for a specific user and market, along with all actions for those orders.
@@ -466,15 +473,17 @@ def get_user_orders_and_actions(
         pages_max: Maximum number of pages to fetch (None for all pages)
         post_only: If True, returns only orders that requested post-only (postOnly=True)
         last_action_status: Filter for specific lastActionStatus (e.g., 'filled', 'canceled')
-        order_type: Filter for specific order type (e.g., 'limit', 'market', 'oracle')
+        order_type: Filter for specific order type or list of types (e.g., 'limit', 'market', 'oracle')
         exclude_liquidations: If True, excludes orders with lastActionExplanation='liquidation'
+        auction_orders_only: If True, returns only orders with auction data (auctionDuration > 0 or auctionStartPrice != 0)
         
     Returns:
-        Tuple containing four DataFrames:
+        Tuple containing five DataFrames:
         - orders_df: DataFrame with order records
         - actions_df: DataFrame with all actions for all orders
         - joined_df: DataFrame with orders joined with their actions
         - auction_slot_diff_df: DataFrame with orders and their auction slot differences
+        - auction_metrics_df: Simplified DataFrame with key auction metrics and fill price
     """
     print(f"Fetching orders and actions for {user_public_key} in {market_filter} market {symbol}...")
     
@@ -492,8 +501,20 @@ def get_user_orders_and_actions(
     
     if orders_df.empty:
         print(f"No orders found for {user_public_key} in {market_filter} market {symbol}.")
-        # Return empty DataFrame for the auction_slot_diff_df as well
-        return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    
+    # Filter for orders with auction data if requested
+    if auction_orders_only:
+        original_count = len(orders_df)
+        orders_df = orders_df[
+            (orders_df['auctionDuration'] > 0) | 
+            (orders_df['auctionStartPrice'].astype(float) != 0)
+        ]
+        print(f"Filtered for orders with auction data: {original_count} -> {len(orders_df)}")
+        
+        if orders_df.empty:
+            print("No orders with auction data found after filtering.")
+            return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     # Get the list of order IDs
     order_ids = orders_df['orderId'].astype(str).tolist()
@@ -564,8 +585,32 @@ def get_user_orders_and_actions(
         
         print(f"Created auction slot difference DataFrame with {len(auction_slot_diff_df)} rows")
         
-        return orders_df, actions_df, joined_df, auction_slot_diff_df
+        # After creating auction_slot_diff_df, create the simplified auction metrics DataFrame
+        if not auction_slot_diff_df.empty:
+            # Calculate fillPrice after converting strings to floats
+            auction_slot_diff_df['fillPrice'] = (
+                auction_slot_diff_df['quoteAssetAmountFilled'].astype(float) / 
+                auction_slot_diff_df['baseAssetAmountFilled'].astype(float)
+            )
+            
+            # Create simplified DataFrame with selected columns in specific order
+            auction_metrics_df = auction_slot_diff_df[[
+                'orderId',
+                'user',
+                'auctionDuration',
+                'auctionStartPrice',
+                'auctionEndPrice',
+                'fillPrice',
+                'auctionSlotDiff'
+            ]].copy()
+            
+            print(f"Created auction metrics DataFrame with {len(auction_metrics_df)} rows")
+            
+            return orders_df, actions_df, joined_df, auction_slot_diff_df, auction_metrics_df
+        else:
+            print("No auction metrics available - returning empty DataFrames")
+            return orders_df, actions_df, joined_df, pd.DataFrame(), pd.DataFrame()
     else:
         print("No actions found for any orders")
         # Return empty DataFrame for the auction_slot_diff_df as well
-        return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
