@@ -612,11 +612,26 @@ def get_user_orders_and_actions(
                     how='left'
                 )
 
-            # Calculate fillPrice after converting strings to floats
+            # Calculate fillPrice and convert price columns as before
             auction_slot_diff_df['fillPrice'] = (
                 auction_slot_diff_df['quoteAssetAmountFilled'].astype(float) / 
                 auction_slot_diff_df['baseAssetAmountFilled'].astype(float)
             )
+            
+            # Convert price columns to float for calculations
+            price_columns = ['auctionStartPrice', 'auctionEndPrice', 'oraclePrice']
+            for col in price_columns:
+                auction_slot_diff_df[col] = auction_slot_diff_df[col].astype(float)
+            
+            # Calculate absolute price differences
+            auction_slot_diff_df['auctionStart_vs_fill'] = abs(auction_slot_diff_df['auctionStartPrice'] - auction_slot_diff_df['fillPrice'])
+            auction_slot_diff_df['auctionEnd_vs_fill'] = abs(auction_slot_diff_df['auctionEndPrice'] - auction_slot_diff_df['fillPrice'])
+            auction_slot_diff_df['oracle_vs_fill'] = abs(auction_slot_diff_df['oraclePrice'] - auction_slot_diff_df['fillPrice'])
+            
+            # Calculate bps differences (multiply by 10000 to convert to bps)
+            auction_slot_diff_df['auctionStart_vs_fill_bps'] = abs((auction_slot_diff_df['auctionStartPrice'] - auction_slot_diff_df['fillPrice']) / auction_slot_diff_df['fillPrice'] * 10000)
+            auction_slot_diff_df['auctionEnd_vs_fill_bps'] = abs((auction_slot_diff_df['auctionEndPrice'] - auction_slot_diff_df['fillPrice']) / auction_slot_diff_df['fillPrice'] * 10000)
+            auction_slot_diff_df['oracle_vs_fill_bps'] = abs((auction_slot_diff_df['oraclePrice'] - auction_slot_diff_df['fillPrice']) / auction_slot_diff_df['fillPrice'] * 10000)
             
             # Create simplified DataFrame with selected columns in specific order
             auction_metrics_df = auction_slot_diff_df[[
@@ -627,6 +642,12 @@ def get_user_orders_and_actions(
                 'auctionEndPrice',
                 'fillPrice',
                 'oraclePrice',
+                'auctionStart_vs_fill',
+                'auctionEnd_vs_fill',
+                'oracle_vs_fill',
+                'auctionStart_vs_fill_bps',
+                'auctionEnd_vs_fill_bps',
+                'oracle_vs_fill_bps',
                 'auctionSlotDiff'
             ]].copy()
             

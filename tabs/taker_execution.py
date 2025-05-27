@@ -81,6 +81,58 @@ def slot_stats(orders_with_slot_diff_df):
     q3_slot_diff = slot_diff.quantile(0.75) # Q3
     return mean_slot_diff, median_slot_diff, min_slot_diff, max_slot_diff, q1_slot_diff, q3_slot_diff
 
+def price_diff_stats(metrics_df: pd.DataFrame):
+    """Calculate statistics for price difference fields and return as DataFrames"""
+    # Define the fields for each type of difference
+    abs_diff_fields = [
+        'auctionStart_vs_fill',
+        'auctionEnd_vs_fill',
+        'oracle_vs_fill'
+    ]
+    
+    bps_diff_fields = [
+        'auctionStart_vs_fill_bps',
+        'auctionEnd_vs_fill_bps',
+        'oracle_vs_fill_bps'
+    ]
+    
+    # Calculate stats for absolute differences
+    abs_stats = {}
+    for field in abs_diff_fields:
+        series = metrics_df[field]
+        abs_stats[field] = {
+            'mean': series.mean(),
+            'std': series.std(),
+            'min': series.min(),
+            'q1': series.quantile(0.25),
+            'median': series.median(),
+            'q3': series.quantile(0.75),
+            'max': series.max()
+        }
+    
+    # Calculate stats for BPS differences
+    bps_stats = {}
+    for field in bps_diff_fields:
+        series = metrics_df[field]
+        bps_stats[field] = {
+            'mean': series.mean(),
+            'std': series.std(),
+            'min': series.min(),
+            'q1': series.quantile(0.25),
+            'median': series.median(),
+            'q3': series.quantile(0.75),
+            'max': series.max()
+        }
+    
+    # Convert to DataFrames
+    abs_df = pd.DataFrame(abs_stats).round(4)
+    bps_df = pd.DataFrame(bps_stats).round(2)
+    
+    # Rename columns for better readability
+    abs_df.columns = ['Auction Start vs Fill', 'Auction End vs Fill', 'Oracle vs Fill']
+    bps_df.columns = ['Auction Start vs Fill', 'Auction End vs Fill', 'Oracle vs Fill']
+    
+    return abs_df, bps_df
 
 async def taker_execution_analysis(clearing_house: DriftClient):
     
@@ -216,6 +268,18 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 # Display the chart
                 st.plotly_chart(fig, use_container_width=True)
                 
+                # Calculate and display price difference statistics
+                abs_stats_df, bps_stats_df = price_diff_stats(auction_metrics_df)
+                
+                st.subheader("Price Difference Statistics")
+                
+                # Display absolute difference stats
+                st.write("Absolute Price Differences:")
+                st.dataframe(abs_stats_df)
+                
+                # Display BPS difference stats
+                st.write("BPS Differences:")
+                st.dataframe(bps_stats_df)
 
             
             except Exception as e:
