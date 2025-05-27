@@ -9,6 +9,7 @@ from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.constants.spot_markets import mainnet_spot_market_configs
 from datafetch.user_records import get_user_orders, get_user_order_actions, get_user_orders_and_actions
 from datafetch.transaction_fetch import get_slot_for_tx
+import plotly.express as px
 
 async def getSlot():
     tx_sig = '28nwj4mKK2M7YxmK12fK24k7U6mcuurSHaN2cC5pxPqiwtXsU9ruyuFGT2XvVSnrVDzGV8xRojQKAm9U5RjqgfwQ'
@@ -34,6 +35,7 @@ async def process_taker_data(taker_pubkey, selected_market, start_date, end_date
     
     pages_max = 20
     if pages_max is not None:
+        # we limit number of pages, otherwise we spend a lot of time fetching ALL of the user's orders
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
     
     # Get orders, actions, and joined data
@@ -61,6 +63,7 @@ async def process_taker_data(taker_pubkey, selected_market, start_date, end_date
         print("new row count after date filter:", len(joined_orders_and_actions_df))
     
     if pages_max is not None:
+        # we limit number of pages, otherwise we spend a lot of time fetching ALL of the user's orders
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
     
     return orders_df, actions_df, joined_orders_and_actions_df, auction_slot_diff_orders_df, auction_metrics_df
@@ -131,14 +134,14 @@ async def taker_execution_analysis(clearing_house: DriftClient):
     selected_order_types = st.multiselect(
         "Order Types (select none for all types)", 
         order_types,
-        default=None
+        default=["limit", "market"]
     )
     
     # Convert empty selection to None for the filter
     order_type_filter = selected_order_types if selected_order_types else None
     
     # Add order ID input for fetching order actions
-    order_id = st.text_input("Order ID", value="20775")
+    order_id = st.text_input("Order ID (only used for Fetch Order Actions)", value="20775")
     
     # Create columns for the buttons
     col1, col2, col3 = st.columns(3)
@@ -162,25 +165,58 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 # Display basic info
                 st.success(f"Fetched {len(taker_df)} taker orders for {selected_market}")
                 
+                # Display the DataFrames (original code)
+                st.subheader("Auction Metrics")
+                st.dataframe(auction_metrics_df)
+                
                 st.subheader("Orders with Auction Slot Diff")
                 st.dataframe(auction_slot_diff_orders_df)
                 
                 if not auction_slot_diff_orders_df.empty:
                     mean_slot_diff, median_slot_diff, min_slot_diff, max_slot_diff, q1_slot_diff, q3_slot_diff = slot_stats(auction_slot_diff_orders_df)
-                    # slot diff header
                     st.write("Slot Diff Stats")
-                    # round to int
                     st.write(f"Mean: {int(mean_slot_diff)}, Median: {int(median_slot_diff)}, Min: {int(min_slot_diff)}, Max: {int(max_slot_diff)}, Q1: {int(q1_slot_diff)}, Q3: {int(q3_slot_diff)}")
                 else:
                     st.info("No orders with auction slot diff data available.")
-                
-                st.subheader("Auction Metrics")
-                st.dataframe(auction_metrics_df)
                 
                 
                 # TODO: output doesn't look right, need to fix
                 # st.subheader("Orders joined with actions")
                 # st.dataframe(taker_df)
+                
+                # Price Comparison Chart
+                st.subheader("Price Comparison")
+                
+                # Convert price columns to float
+                price_columns = ['auctionStartPrice', 'auctionEndPrice', 'fillPrice', 'oraclePrice']
+                for col in price_columns:
+                    auction_metrics_df[col] = auction_metrics_df[col].astype(float)
+                
+                # Create the line chart
+                fig = px.line(
+                    auction_metrics_df,
+                    x=auction_metrics_df.index,
+                    y=price_columns,
+                    title=f'Price Comparison for {selected_market}',
+                    labels={
+                        'index': 'Order Sequence',
+                        'value': 'Price',
+                        'variable': 'Price Type'
+                    }
+                )
+                
+                # Customize the layout
+                fig.update_layout(
+                    xaxis_title="Order Sequence",
+                    yaxis_title="Price",
+                    legend_title="Price Type",
+                    hovermode='x unified'
+                )
+                
+                # Display the chart
+                st.plotly_chart(fig, use_container_width=True)
+                
+
             
             except Exception as e:
                 st.error(f"Error: {str(e)}")

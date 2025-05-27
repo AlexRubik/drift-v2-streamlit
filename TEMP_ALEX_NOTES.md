@@ -6,8 +6,7 @@ init done
 ### - determine the place in the dutch auction (0 -> auction_duration) that the order filled
 init done
 ### - the fill price vs oracle
-Refer to how this is done in tradeflow.py, see comments below.
-Also, will need to join trade and order data if we want to simplify the page to use one df because order data is missing oracle price. Otherwise we can just copy tradeflow.py's implementation of price vs oracle.
+init done
 ### - aggregate statistics (mean, median, quantiles) by market on both a price and bps comparison
 
    -------------------   
@@ -17,8 +16,14 @@ TODO:
 - account for oracle records that use price offset?
 - more aggregate stats
 
+Suggestions:
+- New endpoint to fetch orders in time range
+- New endpoint to fetch order actions in time range
+- New endpoint to fetch joined order and order action data in time range
+- Add oraclePrice field to output of data mentioned above
+
 -----------------
-If we want ALL auction data and not a specified user's data only.
+If we want ALL auction data and not a specified user's data only:
 
 For auction data, you can grab all trades with get_trades_for_range_pandas in api_fetch.py. We do this because we want to grab active accounts in our date range and there is no "get active users in range" endpoint. Use the taker pubkey (user's drift pda aka accountId) from the trade data to fetch the account's orders with get_user_orders I wrote in user_records.py. get_user_orders will give us all of a user's orders (there is no way to filter on date range) that have auction data.
 
@@ -26,22 +31,6 @@ For auction data, you can grab all trades with get_trades_for_range_pandas in ap
 
 This is less of a problem if we want to fetch data for a single user or small array of users which is what we are focusing on.
 
-
-Use this logic for oracle vs fill price
-In tradeflow.py:
-```
-    df1["quoteAssetAmountFilled"] = pd.to_numeric(df1["quoteAssetAmountFilled"])
-    df1["baseAssetAmountFilled"] = pd.to_numeric(df1["baseAssetAmountFilled"])
-    df1["oraclePrice"] = pd.to_numeric(df1["oraclePrice"])
-    df1["markPrice"] = df1["quoteAssetAmountFilled"] / df1["baseAssetAmountFilled"]
-    df1["buyPrice"] = np.nan
-    df1["sellPrice"] = np.nan
-    df1["buyPrice"] = df1.loc[
-        df1[df1["takerOrderDirection"] == "long"].index, "markPrice"
-    ]
-    df1["sellPrice"] = df1.loc[df1["takerOrderDirection"] == "short", "markPrice"]
-
-```
 
 Test urls:
 https://data.api.drift.trade/market/SOL-PERP/trades/2025/05/16

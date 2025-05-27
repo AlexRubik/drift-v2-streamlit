@@ -587,6 +587,31 @@ def get_user_orders_and_actions(
         
         # After creating auction_slot_diff_df, create the simplified auction metrics DataFrame
         if not auction_slot_diff_df.empty:
+            # Convert Unix timestamp to datetime and get the date range
+            start_date = pd.to_datetime(auction_slot_diff_df['ts'].min(), unit='s').date()
+            end_date = pd.to_datetime(auction_slot_diff_df['ts'].max(), unit='s').date()
+            
+            # Get trade data for the same user
+            trades_df = get_user_trades(
+                user_public_key=user_public_key,
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            if not trades_df.empty:
+                # Ensure order IDs are strings for joining
+                trades_df['takerOrderId'] = trades_df['takerOrderId'].astype(str)
+                auction_slot_diff_df['orderId'] = auction_slot_diff_df['orderId'].astype(str)
+
+                # Join with trades to get oracle price
+                auction_slot_diff_df = pd.merge(
+                    auction_slot_diff_df,
+                    trades_df[['takerOrderId', 'oraclePrice']],
+                    left_on='orderId',
+                    right_on='takerOrderId',
+                    how='left'
+                )
+
             # Calculate fillPrice after converting strings to floats
             auction_slot_diff_df['fillPrice'] = (
                 auction_slot_diff_df['quoteAssetAmountFilled'].astype(float) / 
@@ -601,6 +626,7 @@ def get_user_orders_and_actions(
                 'auctionStartPrice',
                 'auctionEndPrice',
                 'fillPrice',
+                'oraclePrice',
                 'auctionSlotDiff'
             ]].copy()
             
