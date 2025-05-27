@@ -8,13 +8,13 @@ init done
 ### - the fill price vs oracle
 init done
 ### - aggregate statistics (mean, median, quantiles) by market on both a price and bps comparison
+init done
 
    -------------------   
 ### Comments
 
 TODO:
 - account for oracle records that use price offset?
-- more aggregate stats
 
 Suggestions:
 - New endpoint to fetch orders in time range
