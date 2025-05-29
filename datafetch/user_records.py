@@ -455,7 +455,9 @@ def calculate_auction_slot_diff(actions_df, order_id):
 def get_user_orders_and_actions(
     user_public_key: str, 
     market_filter: str, 
-    symbol: str, 
+    symbol: str,
+    start_date: date,
+    end_date: date,
     pages_max: int = None, 
     post_only: bool = False,
     last_action_status: str = None,
@@ -502,6 +504,32 @@ def get_user_orders_and_actions(
     if orders_df.empty:
         print(f"No orders found for {user_public_key} in {market_filter} market {symbol}.")
         return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    
+    # filter on start and end date
+    if start_date and end_date:
+        print(f"Filtering orders on start date {start_date} and end date {end_date}")
+        # convert start and end date to datetime unix timestamp
+        start_date_unix = int(datetime(start_date.year, start_date.month, start_date.day).timestamp())
+        end_date_unix = int(datetime(end_date.year, end_date.month, end_date.day).timestamp())
+        
+        # Convert DataFrame timestamps to Unix seconds for comparison
+        orders_df['ts'] = pd.to_datetime(orders_df['ts']).astype(int) // 10**9
+        
+        original_length = len(orders_df)
+        orders_df = orders_df[
+            (orders_df['ts'] >= start_date_unix) & 
+            (orders_df['ts'] <= end_date_unix)
+        ]
+        
+        # Convert timestamps back to datetime
+        orders_df['ts'] = pd.to_datetime(orders_df['ts'], unit='s')
+        
+        print(f"Filtered orders by date range: {original_length} -> {len(orders_df)}")
+        
+        if orders_df.empty:
+            print("No orders found in date range")
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     
     # Filter for orders with auction data if requested
     if auction_orders_only:
@@ -653,11 +681,11 @@ def get_user_orders_and_actions(
             
             print(f"Created auction metrics DataFrame with {len(auction_metrics_df)} rows")
             
-            return orders_df, actions_df, joined_df, auction_slot_diff_df, auction_metrics_df
+            return orders_df.drop_duplicates(), actions_df.drop_duplicates(), joined_df.drop_duplicates(), auction_slot_diff_df.drop_duplicates(), auction_metrics_df.drop_duplicates()
         else:
             print("No auction metrics available - returning empty DataFrames")
-            return orders_df, actions_df, joined_df, pd.DataFrame(), pd.DataFrame()
+            return orders_df.drop_duplicates(), actions_df.drop_duplicates(), joined_df.drop_duplicates(), pd.DataFrame(), pd.DataFrame()
     else:
         print("No actions found for any orders")
         # Return empty DataFrame for the auction_slot_diff_df as well
-        return orders_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return orders_df.drop_duplicates(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
