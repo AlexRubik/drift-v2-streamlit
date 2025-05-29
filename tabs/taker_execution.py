@@ -21,7 +21,7 @@ async def getSlot():
     except Exception as e:
         print(f"Error getting slot for transaction: {str(e)}")
 
-async def process_taker_data(taker_pubkey, selected_market, start_date, end_date, order_type=None):
+async def process_taker_data(taker_pubkey, selected_market, start_date: datetime.date, end_date: datetime.date, order_type=None):
     print("processing taker data for", taker_pubkey, selected_market, start_date, end_date)
     if order_type:
         if isinstance(order_type, list):
@@ -43,6 +43,8 @@ async def process_taker_data(taker_pubkey, selected_market, start_date, end_date
         taker_pubkey, 
         'perp', 
         selected_market, 
+        start_date,
+        end_date,
         pages_max=pages_max, 
         auction_orders_only=True,
         last_action_status='filled',
@@ -221,7 +223,7 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 st.subheader("Auction Metrics")
                 st.dataframe(auction_metrics_df)
                 
-                st.subheader("Orders with Auction Slot Diff")
+                st.subheader("Orders + Auction Metrics")
                 st.dataframe(auction_slot_diff_orders_df)
                 
                 if not auction_slot_diff_orders_df.empty:
