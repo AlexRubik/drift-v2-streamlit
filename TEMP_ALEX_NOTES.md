@@ -1,4 +1,4 @@
-## Include a page that analyzes taker execution over a user specified time period (single day, two date range, etc) broken down by market.
+## Include a page that analyzes taker execution over a user specified time period (single day, two date range, etc) broken down by market:
 
 ### Ideally should include:
 ### - compare place order auction start/end vs the fill record price
@@ -9,6 +9,14 @@ init done
 init done
 ### - aggregate statistics (mean, median, quantiles) by market on both a price and bps comparison
 init done
+
+## Z Comments:
+also would be nice to allow multiple taker keys (multiselect) so we can pass a bulk of similar retail users to get more data
+
+some ideas:
+- we examine performance broken down by long/short vs oracle (I think if market has certain direction the median/average)
+- identify the outliers (abnormal wicks)
+- do graph using timestamps/slots
 
    -------------------   
 ### Comments
