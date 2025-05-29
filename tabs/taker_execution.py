@@ -244,16 +244,16 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 # Convert price columns to float
                 price_columns = ['auctionStartPrice', 'auctionEndPrice', 'fillPrice', 'oraclePrice']
                 for col in price_columns:
-                    auction_metrics_df[col] = auction_metrics_df[col].astype(float)
+                    auction_slot_diff_orders_df[col] = auction_slot_diff_orders_df[col].astype(float)
                 
                 # Create the line chart
                 fig = px.line(
-                    auction_metrics_df,
-                    x=auction_metrics_df.index,
+                    auction_slot_diff_orders_df,
+                    x=auction_slot_diff_orders_df['ts'], # ts for each order
                     y=price_columns,
                     title=f'Price Comparison for {selected_market}',
                     labels={
-                        'index': 'Order Sequence',
+                        'index': 'Timestamp',
                         'value': 'Price',
                         'variable': 'Price Type'
                     }
@@ -261,7 +261,7 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 
                 # Customize the layout
                 fig.update_layout(
-                    xaxis_title="Order Sequence",
+                    xaxis_title="Timestamp",
                     yaxis_title="Price",
                     legend_title="Price Type",
                     hovermode='x unified'
