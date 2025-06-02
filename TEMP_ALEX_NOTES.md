@@ -18,6 +18,11 @@ some ideas:
 - identify the outliers (abnormal wicks)
 - do graph using timestamps/slots
 
+"performance broken down by long/short vs oracle"
+you mean like non oracle long/short vs oracle long/short?
+
+oracle vs market order breakdown valuable too, but what to see how longs/shorts perform separately as well (maybe longs fill slower than shorts)
+
    -------------------   
 ### Comments
 

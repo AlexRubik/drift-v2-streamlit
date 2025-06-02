@@ -7,7 +7,7 @@ from datafetch.s3_fetch import load_s3_trades_data
 from constants import ALL_MARKET_NAMES
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.constants.spot_markets import mainnet_spot_market_configs
-from datafetch.user_records import get_user_orders, get_user_order_actions, get_user_orders_and_actions
+from datafetch.user_records import analyze_auction_slots_by_direction, format_auction_analysis_results, get_user_orders, get_user_order_actions, get_user_orders_and_actions
 from datafetch.transaction_fetch import get_slot_for_tx
 import plotly.express as px
 
@@ -232,6 +232,15 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                     st.write(f"Mean: {int(mean_slot_diff)}, Median: {int(median_slot_diff)}, Min: {int(min_slot_diff)}, Max: {int(max_slot_diff)}, Q1: {int(q1_slot_diff)}, Q3: {int(q3_slot_diff)}")
                 else:
                     st.info("No orders with auction slot diff data available.")
+                    
+                # Get the analysis results
+                analysis_results = analyze_auction_slots_by_direction(auction_slot_diff_orders_df)
+
+                # Format the results
+                formatted_results = format_auction_analysis_results(analysis_results)
+
+                # Display the results
+                display_auction_analysis(formatted_results)
                 
                 
                 # TODO: output doesn't look right, need to fix
@@ -315,3 +324,53 @@ async def taker_execution_analysis(clearing_house: DriftClient):
         with st.spinner("Getting slot..."):
             slot = await getSlot()
             st.success(f"Slot: {slot}")
+
+def display_auction_analysis(formatted_results):
+    st.header("Auction Slot Difference Analysis")
+
+    # Overall Statistics
+    st.subheader("Overall Statistics")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("LONG Orders (All Types)")
+        st.table(pd.Series(formatted_results['overall_stats']['long']['basic_stats']))
+        if formatted_results['overall_stats']['long']['outliers']:
+            st.write("Outliers:")
+            st.table(pd.DataFrame(formatted_results['overall_stats']['long']['outliers']))
+    
+    with col2:
+        st.write("SHORT Orders (All Types)")
+        st.table(pd.Series(formatted_results['overall_stats']['short']['basic_stats']))
+        if formatted_results['overall_stats']['short']['outliers']:
+            st.write("Outliers:")
+            st.table(pd.DataFrame(formatted_results['overall_stats']['short']['outliers']))
+    
+    st.write("Overall Comparison (Long vs Short)")
+    st.table(pd.Series(formatted_results['overall_stats']['comparison']))
+    
+    # Statistics by Order Type
+    st.subheader("Statistics by Order Type")
+    
+    for order_type, type_results in formatted_results['by_order_type'].items():
+        st.write(f"\nORDER TYPE: {order_type}")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("LONG Orders")
+            st.table(pd.Series(type_results['long']['basic_stats']))
+            if type_results['long']['outliers']:
+                st.write("Outliers:")
+                st.table(pd.DataFrame(type_results['long']['outliers']))
+        
+        with col2:
+            st.write("SHORT Orders")
+            st.table(pd.Series(type_results['short']['basic_stats']))
+            if type_results['short']['outliers']:
+                st.write("Outliers:")
+                st.table(pd.DataFrame(type_results['short']['outliers']))
+        
+        st.write(f"Comparison for {order_type} (Long vs Short)")
+        st.table(pd.Series(type_results['comparison']))

@@ -681,6 +681,17 @@ def get_user_orders_and_actions(
             
             print(f"Created auction metrics DataFrame with {len(auction_metrics_df)} rows")
             
+            # After creating auction_slot_diff_df and before returning
+            print("\nAuction Slot Diff Orders DataFrame Schema:")
+            print("Columns and their data types:")
+            for col in auction_slot_diff_df.columns:
+                print(f"{col}: {auction_slot_diff_df[col].dtype}")
+                
+            # Summary of auction_slot_diff_df
+            auction_slot_diff_summary_stats = analyze_auction_slots_by_direction(auction_slot_diff_df)
+            print("\nAuction Slot Diff Summary Statistics:")
+            print(auction_slot_diff_summary_stats)
+            
             return orders_df.drop_duplicates(), actions_df.drop_duplicates(), joined_df.drop_duplicates(), auction_slot_diff_df.drop_duplicates(), auction_metrics_df.drop_duplicates()
         else:
             print("No auction metrics available - returning empty DataFrames")
@@ -689,3 +700,280 @@ def get_user_orders_and_actions(
         print("No actions found for any orders")
         # Return empty DataFrame for the auction_slot_diff_df as well
         return orders_df.drop_duplicates(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+def analyze_auction_slots_by_direction(auction_slot_diff_df: pd.DataFrame) -> dict:
+    """
+    Analyzes auction slot differences for long and short positions, broken down by order type.
+    
+    Args:
+        auction_slot_diff_df: DataFrame containing auction slot difference data
+        
+    Returns:
+        Dictionary containing statistics for both long and short positions, overall and by order type
+    """
+    def get_outliers(group_df):
+        q1 = group_df['auctionSlotDiff'].quantile(0.25)
+        q3 = group_df['auctionSlotDiff'].quantile(0.75)
+        iqr = q3 - q1
+        lower_bound = q1 - (1.5 * iqr)
+        upper_bound = q3 + (1.5 * iqr)
+        outliers = group_df[
+            (group_df['auctionSlotDiff'] < lower_bound) | 
+            (group_df['auctionSlotDiff'] > upper_bound)
+        ]
+        return outliers
+    
+    def calculate_stats(df):
+        if df.empty:
+            return {}
+        return {
+            'count': len(df),
+            'mean': df['auctionSlotDiff'].mean(),
+            'median': df['auctionSlotDiff'].median(),
+            'std': df['auctionSlotDiff'].std(),
+            'min': df['auctionSlotDiff'].min(),
+            'max': df['auctionSlotDiff'].max(),
+            'q1': df['auctionSlotDiff'].quantile(0.25),
+            'q3': df['auctionSlotDiff'].quantile(0.75),
+            'outliers': get_outliers(df).to_dict('records')
+        }
+    
+    def compare_groups(group1, group2, name1, name2):
+        if group1.empty or group2.empty:
+            return {}
+            
+        comparison = {
+            'mean_difference': group1['auctionSlotDiff'].mean() - group2['auctionSlotDiff'].mean(),
+            'median_difference': group1['auctionSlotDiff'].median() - group2['auctionSlotDiff'].median(),
+            'std_difference': group1['auctionSlotDiff'].std() - group2['auctionSlotDiff'].std()
+        }
+        
+        if group2['auctionSlotDiff'].mean() != 0:
+            comparison[f'{name1}_to_{name2}_ratio'] = (
+                group1['auctionSlotDiff'].mean() / group2['auctionSlotDiff'].mean()
+            )
+        
+        try:
+            from scipy import stats
+            statistic, p_value = stats.mannwhitneyu(
+                group1['auctionSlotDiff'],
+                group2['auctionSlotDiff'],
+                alternative='two-sided'
+            )
+            comparison['mann_whitney_u_test'] = {
+                'statistic': statistic,
+                'p_value': p_value,
+                'significant_difference': p_value < 0.05
+            }
+        except ImportError:
+            print("scipy not installed - skipping statistical tests")
+        except Exception as e:
+            print(f"Statistical test failed: {str(e)}")
+            
+        return comparison
+    
+    # Initialize results dictionary
+    results = {
+        'overall': {
+            'long': {},
+            'short': {},
+            'comparison': {}
+        },
+        'by_order_type': {}
+    }
+    
+    # Get unique order types
+    order_types = auction_slot_diff_df['orderType'].unique()
+    
+    # Overall analysis (as before)
+    longs = auction_slot_diff_df[auction_slot_diff_df['direction'] == 'long']
+    shorts = auction_slot_diff_df[auction_slot_diff_df['direction'] == 'short']
+    
+    results['overall']['long'] = calculate_stats(longs)
+    results['overall']['short'] = calculate_stats(shorts)
+    results['overall']['comparison'] = compare_groups(longs, shorts, 'long', 'short')
+    
+    # Analysis by order type
+    for order_type in order_types:
+        order_type_df = auction_slot_diff_df[auction_slot_diff_df['orderType'] == order_type]
+        order_type_longs = order_type_df[order_type_df['direction'] == 'long']
+        order_type_shorts = order_type_df[order_type_df['direction'] == 'short']
+        
+        results['by_order_type'][order_type] = {
+            'long': calculate_stats(order_type_longs),
+            'short': calculate_stats(order_type_shorts),
+            'comparison': compare_groups(order_type_longs, order_type_shorts, 'long', 'short')
+        }
+    
+    # Print detailed summary
+    print("\nAUCTION SLOT DIFFERENCE ANALYSIS")
+    print("\n=== OVERALL STATISTICS ===")
+    for direction in ['long', 'short']:
+        if results['overall'][direction]:
+            print(f"\n{direction.upper()} Orders (All Types):")
+            stats = results['overall'][direction]
+            print(f"Count: {stats['count']}")
+            print(f"Mean: {stats['mean']:.2f} slots")
+            print(f"Median: {stats['median']:.2f} slots")
+            print(f"Std Dev: {stats['std']:.2f} slots")
+            print(f"Min: {stats['min']:.2f} slots")
+            print(f"Max: {stats['max']:.2f} slots")
+            print(f"Q1: {stats['q1']:.2f} slots")
+            print(f"Q3: {stats['q3']:.2f} slots")
+            print(f"Number of outliers: {len(stats['outliers'])}")
+            if stats['outliers']:
+                print("Outlier Orders:")
+                for outlier in stats['outliers']:
+                    print(f"  OrderId: {outlier['orderId']}, Slot Diff: {outlier['auctionSlotDiff']}")
+    
+    if results['overall']['comparison']:
+        comp = results['overall']['comparison']
+        print("\nOverall Comparison (Long vs Short):")
+        print(f"Mean Difference: {comp['mean_difference']:.2f} slots")
+        print(f"Median Difference: {comp['median_difference']:.2f} slots")
+        if 'long_to_short_ratio' in comp:
+            print(f"Long/Short Ratio: {comp['long_to_short_ratio']:.2f}")
+        if 'mann_whitney_u_test' in comp:
+            print(f"Statistically Significant Difference: {comp['mann_whitney_u_test']['significant_difference']}")
+            print(f"P-value: {comp['mann_whitney_u_test']['p_value']:.4f}")
+    
+    print("\n=== STATISTICS BY ORDER TYPE ===")
+    for order_type in order_types:
+        print(f"\nORDER TYPE: {order_type}")
+        for direction in ['long', 'short']:
+            stats = results['by_order_type'][order_type][direction]
+            if stats:
+                print(f"\n{direction.upper()} Orders:")
+                print(f"Count: {stats['count']}")
+                print(f"Mean: {stats['mean']:.2f} slots")
+                print(f"Median: {stats['median']:.2f} slots")
+                print(f"Std Dev: {stats['std']:.2f} slots")
+                print(f"Min: {stats['min']:.2f} slots")
+                print(f"Max: {stats['max']:.2f} slots")
+                print(f"Q1: {stats['q1']:.2f} slots")
+                print(f"Q3: {stats['q3']:.2f} slots")
+                print(f"Number of outliers: {len(stats['outliers'])}")
+                if stats['outliers']:
+                    print("Outlier Orders:")
+                    for outlier in stats['outliers']:
+                        print(f"  OrderId: {outlier['orderId']}, Slot Diff: {outlier['auctionSlotDiff']}")
+        
+        comp = results['by_order_type'][order_type]['comparison']
+        if comp:
+            print(f"\nComparison for {order_type} (Long vs Short):")
+            print(f"Mean Difference: {comp['mean_difference']:.2f} slots")
+            print(f"Median Difference: {comp['median_difference']:.2f} slots")
+            if 'long_to_short_ratio' in comp:
+                print(f"Long/Short Ratio: {comp['long_to_short_ratio']:.2f}")
+            if 'mann_whitney_u_test' in comp:
+                print(f"Statistically Significant Difference: {comp['mann_whitney_u_test']['significant_difference']}")
+                print(f"P-value: {comp['mann_whitney_u_test']['p_value']:.4f}")
+    
+    return results
+
+def format_auction_analysis_results(results: dict) -> dict:
+    """
+    Formats the auction analysis results into a structured dictionary for display
+    """
+    formatted_results = {
+        'overall_stats': {
+            'long': {
+                'basic_stats': {
+                    'Count': results['overall']['long']['count'],
+                    'Mean': f"{results['overall']['long']['mean']:.2f} slots",
+                    'Median': f"{results['overall']['long']['median']:.2f} slots",
+                    'Std Dev': f"{results['overall']['long']['std']:.2f} slots",
+                    'Min': f"{results['overall']['long']['min']:.2f} slots",
+                    'Max': f"{results['overall']['long']['max']:.2f} slots",
+                    'Q1': f"{results['overall']['long']['q1']:.2f} slots",
+                    'Q3': f"{results['overall']['long']['q3']:.2f} slots",
+                },
+                'outliers': [
+                    {
+                        'OrderId': outlier['orderId'],
+                        'Slot Diff': outlier['auctionSlotDiff']
+                    }
+                    for outlier in results['overall']['long']['outliers']
+                ]
+            },
+            'short': {
+                'basic_stats': {
+                    'Count': results['overall']['short']['count'],
+                    'Mean': f"{results['overall']['short']['mean']:.2f} slots",
+                    'Median': f"{results['overall']['short']['median']:.2f} slots",
+                    'Std Dev': f"{results['overall']['short']['std']:.2f} slots",
+                    'Min': f"{results['overall']['short']['min']:.2f} slots",
+                    'Max': f"{results['overall']['short']['max']:.2f} slots",
+                    'Q1': f"{results['overall']['short']['q1']:.2f} slots",
+                    'Q3': f"{results['overall']['short']['q3']:.2f} slots",
+                },
+                'outliers': [
+                    {
+                        'OrderId': outlier['orderId'],
+                        'Slot Diff': outlier['auctionSlotDiff']
+                    }
+                    for outlier in results['overall']['short']['outliers']
+                ]
+            },
+            'comparison': {
+                'Mean Difference': f"{results['overall']['comparison']['mean_difference']:.2f} slots",
+                'Median Difference': f"{results['overall']['comparison']['median_difference']:.2f} slots",
+                'Long/Short Ratio': f"{results['overall']['comparison'].get('long_to_short_ratio', 'N/A'):.2f}",
+                'Statistically Significant': results['overall']['comparison']['mann_whitney_u_test']['significant_difference'],
+                'P-value': f"{results['overall']['comparison']['mann_whitney_u_test']['p_value']:.4f}"
+            }
+        },
+        'by_order_type': {}
+    }
+
+    # Format order type statistics
+    for order_type, type_results in results['by_order_type'].items():
+        formatted_results['by_order_type'][order_type] = {
+            'long': {
+                'basic_stats': {
+                    'Count': type_results['long']['count'],
+                    'Mean': f"{type_results['long']['mean']:.2f} slots",
+                    'Median': f"{type_results['long']['median']:.2f} slots",
+                    'Std Dev': f"{type_results['long']['std']:.2f} slots",
+                    'Min': f"{type_results['long']['min']:.2f} slots",
+                    'Max': f"{type_results['long']['max']:.2f} slots",
+                    'Q1': f"{type_results['long']['q1']:.2f} slots",
+                    'Q3': f"{type_results['long']['q3']:.2f} slots",
+                },
+                'outliers': [
+                    {
+                        'OrderId': outlier['orderId'],
+                        'Slot Diff': outlier['auctionSlotDiff']
+                    }
+                    for outlier in type_results['long']['outliers']
+                ]
+            },
+            'short': {
+                'basic_stats': {
+                    'Count': type_results['short']['count'],
+                    'Mean': f"{type_results['short']['mean']:.2f} slots",
+                    'Median': f"{type_results['short']['median']:.2f} slots",
+                    'Std Dev': f"{type_results['short']['std']:.2f} slots",
+                    'Min': f"{type_results['short']['min']:.2f} slots",
+                    'Max': f"{type_results['short']['max']:.2f} slots",
+                    'Q1': f"{type_results['short']['q1']:.2f} slots",
+                    'Q3': f"{type_results['short']['q3']:.2f} slots",
+                },
+                'outliers': [
+                    {
+                        'OrderId': outlier['orderId'],
+                        'Slot Diff': outlier['auctionSlotDiff']
+                    }
+                    for outlier in type_results['short']['outliers']
+                ]
+            },
+            'comparison': {
+                'Mean Difference': f"{type_results['comparison']['mean_difference']:.2f} slots",
+                'Median Difference': f"{type_results['comparison']['median_difference']:.2f} slots",
+                'Long/Short Ratio': f"{type_results['comparison'].get('long_to_short_ratio', 'N/A'):.2f}" if 'long_to_short_ratio' in type_results['comparison'] else 'N/A',
+                'Statistically Significant': type_results['comparison']['mann_whitney_u_test']['significant_difference'] if 'mann_whitney_u_test' in type_results['comparison'] else 'N/A',
+                'P-value': f"{type_results['comparison']['mann_whitney_u_test']['p_value']:.4f}" if 'mann_whitney_u_test' in type_results['comparison'] else 'N/A'
+            }
+        }
+
+    return formatted_results
