@@ -699,7 +699,7 @@ def get_user_orders_and_actions(
     else:
         print("No actions found for any orders")
         # Return empty DataFrame for the auction_slot_diff_df as well
-        return orders_df.drop_duplicates(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return orders_df.drop_duplicates(), actions_df.drop_duplicates(), joined_df.drop_duplicates(), pd.DataFrame(), pd.DataFrame()
 
 def analyze_auction_slots_by_direction(auction_slot_diff_df: pd.DataFrame) -> dict:
     """
@@ -977,3 +977,156 @@ def format_auction_analysis_results(results: dict) -> dict:
         }
 
     return formatted_results
+
+def get_multiple_users_orders_and_actions(
+    user_public_keys: List[str], 
+    market_filter: str, 
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    pages_max: int = None, 
+    post_only: bool = False,
+    last_action_status: str = None,
+    order_type: Union[str, List[str]] = None,
+    exclude_liquidations: bool = False,
+    auction_orders_only: bool = False
+):
+    """
+    Fetches order records and actions for multiple users in a specific market.
+    
+    Args:
+        user_public_keys: List of user public keys to fetch data for
+        market_filter: The market type ('spot', 'perp', or 'prediction')
+        symbol: The market symbol (e.g., 'SOL-PERP', 'SOL')
+        start_date: Start date for filtering orders
+        end_date: End date for filtering orders
+        pages_max: Maximum number of pages to fetch per user (None for all pages)
+        post_only: If True, returns only orders that requested post-only (postOnly=True)
+        last_action_status: Filter for specific lastActionStatus (e.g., 'filled', 'canceled')
+        order_type: Filter for specific order type or list of types (e.g., 'limit', 'market', 'oracle')
+        exclude_liquidations: If True, excludes orders with lastActionExplanation='liquidation'
+        auction_orders_only: If True, returns only orders with auction data (auctionDuration > 0 or auctionStartPrice != 0)
+        
+    Returns:
+        Tuple containing five aggregated DataFrames:
+        - aggregated_orders_df: Combined DataFrame with order records from all users
+        - aggregated_actions_df: Combined DataFrame with all actions for all orders from all users
+        - aggregated_joined_df: Combined DataFrame with orders joined with their actions from all users
+        - aggregated_auction_slot_diff_df: Combined DataFrame with orders and their auction slot differences from all users
+        - aggregated_auction_metrics_df: Combined DataFrame with key auction metrics and fill prices from all users
+    """
+    print(f"Fetching orders and actions for {len(user_public_keys)} users in {market_filter} market {symbol}...")
+    
+    # Initialize lists to collect DataFrames from each user
+    all_orders_dfs = []
+    all_actions_dfs = []
+    all_joined_dfs = []
+    all_auction_slot_diff_dfs = []
+    all_auction_metrics_dfs = []
+    
+    # Loop through each user public key
+    for i, user_public_key in enumerate(user_public_keys, 1):
+        print(f"\n--- Processing user {i}/{len(user_public_keys)}: {user_public_key} ---")
+        
+        try:
+            # Get orders and actions for this user
+            orders_df, actions_df, joined_df, auction_slot_diff_df, auction_metrics_df = get_user_orders_and_actions(
+                user_public_key=user_public_key,
+                market_filter=market_filter,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                pages_max=pages_max,
+                post_only=post_only,
+                last_action_status=last_action_status,
+                order_type=order_type,
+                exclude_liquidations=exclude_liquidations,
+                auction_orders_only=auction_orders_only
+            )
+            
+            # Append non-empty DataFrames to respective lists
+            if not orders_df.empty:
+                all_orders_dfs.append(orders_df)
+                print(f"Added {len(orders_df)} orders for user {user_public_key}")
+            
+            if not actions_df.empty:
+                all_actions_dfs.append(actions_df)
+                print(f"Added {len(actions_df)} actions for user {user_public_key}")
+            
+            if not joined_df.empty:
+                all_joined_dfs.append(joined_df)
+                print(f"Added {len(joined_df)} joined records for user {user_public_key}")
+            
+            if not auction_slot_diff_df.empty:
+                all_auction_slot_diff_dfs.append(auction_slot_diff_df)
+                print(f"Added {len(auction_slot_diff_df)} auction slot diff records for user {user_public_key}")
+            
+            if not auction_metrics_df.empty:
+                all_auction_metrics_dfs.append(auction_metrics_df)
+                print(f"Added {len(auction_metrics_df)} auction metrics records for user {user_public_key}")
+            
+            # Be nice to the API between users
+            time.sleep(0.1)
+            
+        except Exception as e:
+            print(f"Error processing user {user_public_key}: {e}")
+            continue
+    
+    # Aggregate all DataFrames
+    print(f"\n--- Aggregating results from all users ---")
+    
+    # Combine orders DataFrames
+    if all_orders_dfs:
+        aggregated_orders_df = pd.concat(all_orders_dfs, ignore_index=True)
+        print(f"Aggregated orders DataFrame: {len(aggregated_orders_df)} total records")
+    else:
+        aggregated_orders_df = pd.DataFrame()
+        print("No orders found for any users")
+    
+    # Combine actions DataFrames
+    if all_actions_dfs:
+        aggregated_actions_df = pd.concat(all_actions_dfs, ignore_index=True)
+        print(f"Aggregated actions DataFrame: {len(aggregated_actions_df)} total records")
+    else:
+        aggregated_actions_df = pd.DataFrame()
+        print("No actions found for any users")
+    
+    # Combine joined DataFrames
+    if all_joined_dfs:
+        aggregated_joined_df = pd.concat(all_joined_dfs, ignore_index=True)
+        print(f"Aggregated joined DataFrame: {len(aggregated_joined_df)} total records")
+    else:
+        aggregated_joined_df = pd.DataFrame()
+        print("No joined records found for any users")
+    
+    # Combine auction slot diff DataFrames
+    if all_auction_slot_diff_dfs:
+        aggregated_auction_slot_diff_df = pd.concat(all_auction_slot_diff_dfs, ignore_index=True)
+        print(f"Aggregated auction slot diff DataFrame: {len(aggregated_auction_slot_diff_df)} total records")
+    else:
+        aggregated_auction_slot_diff_df = pd.DataFrame()
+        print("No auction slot diff records found for any users")
+    
+    # Combine auction metrics DataFrames
+    if all_auction_metrics_dfs:
+        aggregated_auction_metrics_df = pd.concat(all_auction_metrics_dfs, ignore_index=True)
+        print(f"Aggregated auction metrics DataFrame: {len(aggregated_auction_metrics_df)} total records")
+    else:
+        aggregated_auction_metrics_df = pd.DataFrame()
+        print("No auction metrics records found for any users")
+    
+    print(f"\n--- Completed processing {len(user_public_keys)} users ---")
+    print(f"Final aggregated results:")
+    print(f"  Orders: {len(aggregated_orders_df)} records")
+    print(f"  Actions: {len(aggregated_actions_df)} records") 
+    print(f"  Joined: {len(aggregated_joined_df)} records")
+    print(f"  Auction Slot Diff: {len(aggregated_auction_slot_diff_df)} records")
+    print(f"  Auction Metrics: {len(aggregated_auction_metrics_df)} records")
+    
+    return (
+        aggregated_orders_df,
+        aggregated_actions_df, 
+        aggregated_joined_df,
+        aggregated_auction_slot_diff_df,
+        aggregated_auction_metrics_df
+    )

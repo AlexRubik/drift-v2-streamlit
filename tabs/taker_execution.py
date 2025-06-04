@@ -7,7 +7,7 @@ from datafetch.s3_fetch import load_s3_trades_data
 from constants import ALL_MARKET_NAMES
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.constants.spot_markets import mainnet_spot_market_configs
-from datafetch.user_records import analyze_auction_slots_by_direction, format_auction_analysis_results, get_user_orders, get_user_order_actions, get_user_orders_and_actions
+from datafetch.user_records import analyze_auction_slots_by_direction, format_auction_analysis_results, get_user_orders, get_user_order_actions, get_user_orders_and_actions, get_multiple_users_orders_and_actions
 from datafetch.transaction_fetch import get_slot_for_tx
 import plotly.express as px
 
@@ -21,8 +21,8 @@ async def getSlot():
     except Exception as e:
         print(f"Error getting slot for transaction: {str(e)}")
 
-async def process_taker_data(taker_pubkey, selected_market, start_date: datetime.date, end_date: datetime.date, order_type=None):
-    print("processing taker data for", taker_pubkey, selected_market, start_date, end_date)
+async def process_taker_data(taker_pubkeys, selected_market, start_date: datetime.date, end_date: datetime.date, order_type=None):
+    print("processing taker data for", taker_pubkeys, selected_market, start_date, end_date)
     if order_type:
         if isinstance(order_type, list):
             print(f"Filtering for order types: {', '.join(order_type)}")
@@ -38,9 +38,9 @@ async def process_taker_data(taker_pubkey, selected_market, start_date: datetime
         # we limit number of pages, otherwise we spend a lot of time fetching ALL of the user's orders
         print("YOU ARE USING A LIMITED NUMBER OF PAGES, THIS IS NOT RECOMMENDED FOR PRODUCTION")
     
-    # Get orders, actions, and joined data
-    orders_df, actions_df, joined_orders_and_actions_df, auction_slot_diff_orders_df, auction_metrics_df = get_user_orders_and_actions(
-        taker_pubkey, 
+    # Get orders, actions, and joined data for multiple users
+    orders_df, actions_df, joined_orders_and_actions_df, auction_slot_diff_orders_df, auction_metrics_df = get_multiple_users_orders_and_actions(
+        taker_pubkeys, 
         'perp', 
         selected_market, 
         start_date,
@@ -158,8 +158,26 @@ async def taker_execution_analysis(clearing_house: DriftClient):
         if spot not in markets:
             markets.append(spot)
             
-    # taker pubkey input
-    taker_pubkey = st.text_input("Taker pubkey", value="48TRXHqSoBUYTRUvPyPorZQPiNSdAQEg8J6b7Kepmbzh")
+    # taker pubkeys input - changed to text_area for multiple pubkeys
+    st.subheader("Taker Public Keys")
+    taker_pubkeys_input = st.text_area(
+        "Enter taker pubkeys (one per line)", 
+        value="48TRXHqSoBUYTRUvPyPorZQPiNSdAQEg8J6b7Kepmbzh",
+        height=100,
+        help="Enter one public key per line. You can add multiple users to analyze their combined data."
+    )
+    
+    # Parse the pubkeys from the text area
+    taker_pubkeys = [pubkey.strip() for pubkey in taker_pubkeys_input.strip().split('\n') if pubkey.strip()]
+    
+    # Display how many pubkeys were entered
+    if taker_pubkeys:
+        st.info(f"Found {len(taker_pubkeys)} taker pubkey(s) to analyze")
+        with st.expander("View entered pubkeys"):
+            for i, pubkey in enumerate(taker_pubkeys, 1):
+                st.write(f"{i}. {pubkey}")
+    else:
+        st.warning("Please enter at least one taker pubkey")
             
     selected_market = market_symbol0.selectbox(
         "Market symbol", 
@@ -194,18 +212,25 @@ async def taker_execution_analysis(clearing_house: DriftClient):
     # Convert empty selection to None for the filter
     order_type_filter = selected_order_types if selected_order_types else None
     
-    # Add order ID input for fetching order actions
-    order_id = st.text_input("Order ID (only used for Fetch Order Actions)", value="20775")
+    # Add order ID input for fetching order actions (keep single user functionality)
+    st.subheader("Single Order Analysis")
+    col_single_1, col_single_2 = st.columns(2)
+    single_taker_pubkey = col_single_1.text_input("Single taker pubkey (for order actions)", value="48TRXHqSoBUYTRUvPyPorZQPiNSdAQEg8J6b7Kepmbzh")
+    order_id = col_single_2.text_input("Order ID (only used for Fetch Order Actions)", value="20775")
     
     # Create columns for the buttons
     col1, col2, col3 = st.columns(3)
     
     # Fetch data button
     if col1.button("Fetch Orders"):
-        with st.spinner(f"Fetching orders and actions data for {selected_market} from {start_date} to {end_date}..."):
+        if not taker_pubkeys:
+            st.error("Please enter at least one taker pubkey")
+            return
+            
+        with st.spinner(f"Fetching orders and actions data for {len(taker_pubkeys)} user(s) in {selected_market} from {start_date} to {end_date}..."):
             try:
                 orders_df, actions_df, taker_df, auction_slot_diff_orders_df, auction_metrics_df = await process_taker_data(
-                    taker_pubkey, 
+                    taker_pubkeys, 
                     selected_market, 
                     start_date, 
                     end_date,
@@ -217,7 +242,13 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                     return
                 
                 # Display basic info
-                st.success(f"Fetched {len(taker_df)} taker orders for {selected_market}")
+                st.success(f"Fetched {len(taker_df)} taker orders for {selected_market} from {len(taker_pubkeys)} user(s)")
+                
+                # Display summary by user
+                if 'user' in auction_slot_diff_orders_df.columns:
+                    user_summary = auction_slot_diff_orders_df.groupby('user').size().reset_index(name='order_count')
+                    st.subheader("Orders by User")
+                    st.dataframe(user_summary)
                 
                 # Display the DataFrames (original code)
                 st.subheader("Auction Metrics")
@@ -242,11 +273,6 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 # Display the results
                 display_auction_analysis(formatted_results)
                 
-                
-                # TODO: output doesn't look right, need to fix
-                # st.subheader("Orders joined with actions")
-                # st.dataframe(taker_df)
-                
                 # Price Comparison Chart
                 st.subheader("Price Comparison")
                 
@@ -260,7 +286,7 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                     auction_slot_diff_orders_df,
                     x=auction_slot_diff_orders_df['ts'], # ts for each order
                     y=price_columns,
-                    title=f'Price Comparison for {selected_market}',
+                    title=f'Price Comparison for {selected_market} ({len(taker_pubkeys)} user(s))',
                     labels={
                         'index': 'Timestamp',
                         'value': 'Price',
@@ -297,12 +323,16 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 st.error(f"Error: {str(e)}")
                 st.info("Try selecting a different date range or market where data is available.")
     
-    # Fetch order actions button            
+    # Fetch order actions button (keep single user functionality)           
     if col2.button("Fetch Order Actions"):
+        if not single_taker_pubkey.strip():
+            st.error("Please enter a single taker pubkey for order actions")
+            return
+            
         with st.spinner(f"Fetching actions for order ID {order_id}..."):
             try:
                 # Fetch order actions
-                actions_df = get_user_order_actions(taker_pubkey, order_id)
+                actions_df = get_user_order_actions(single_taker_pubkey, order_id)
                 
                 if actions_df.empty:
                     st.warning(f"No actions found for order ID {order_id}.")
@@ -335,21 +365,34 @@ def display_auction_analysis(formatted_results):
     
     with col1:
         st.write("LONG Orders (All Types)")
-        st.table(pd.Series(formatted_results['overall_stats']['long']['basic_stats']))
+        # Convert to DataFrame with proper handling of data types
+        long_stats = pd.DataFrame(list(formatted_results['overall_stats']['long']['basic_stats'].items()), 
+                                 columns=['Metric', 'Value'])
+        st.dataframe(long_stats)
+        
         if formatted_results['overall_stats']['long']['outliers']:
             st.write("Outliers:")
-            st.table(pd.DataFrame(formatted_results['overall_stats']['long']['outliers']))
+            outliers_df = pd.DataFrame(formatted_results['overall_stats']['long']['outliers'])
+            st.dataframe(outliers_df)
     
     with col2:
         st.write("SHORT Orders (All Types)")
-        st.table(pd.Series(formatted_results['overall_stats']['short']['basic_stats']))
+        # Convert to DataFrame with proper handling of data types
+        short_stats = pd.DataFrame(list(formatted_results['overall_stats']['short']['basic_stats'].items()), 
+                                  columns=['Metric', 'Value'])
+        st.dataframe(short_stats)
+        
         if formatted_results['overall_stats']['short']['outliers']:
             st.write("Outliers:")
-            st.table(pd.DataFrame(formatted_results['overall_stats']['short']['outliers']))
+            outliers_df = pd.DataFrame(formatted_results['overall_stats']['short']['outliers'])
+            st.dataframe(outliers_df)
     
     st.write("Overall Comparison (Long vs Short)")
-    st.table(pd.Series(formatted_results['overall_stats']['comparison']))
-    
+    # Convert to DataFrame with proper handling of data types
+    comparison_stats = pd.DataFrame(list(formatted_results['overall_stats']['comparison'].items()), 
+                                   columns=['Metric', 'Value'])
+    st.dataframe(comparison_stats)
+
     # Statistics by Order Type
     st.subheader("Statistics by Order Type")
     
@@ -360,17 +403,27 @@ def display_auction_analysis(formatted_results):
         
         with col1:
             st.write("LONG Orders")
-            st.table(pd.Series(type_results['long']['basic_stats']))
+            long_stats = pd.DataFrame(list(type_results['long']['basic_stats'].items()), 
+                                     columns=['Metric', 'Value'])
+            st.dataframe(long_stats)
+            
             if type_results['long']['outliers']:
                 st.write("Outliers:")
-                st.table(pd.DataFrame(type_results['long']['outliers']))
+                outliers_df = pd.DataFrame(type_results['long']['outliers'])
+                st.dataframe(outliers_df)
         
         with col2:
             st.write("SHORT Orders")
-            st.table(pd.Series(type_results['short']['basic_stats']))
+            short_stats = pd.DataFrame(list(type_results['short']['basic_stats'].items()), 
+                                      columns=['Metric', 'Value'])
+            st.dataframe(short_stats)
+            
             if type_results['short']['outliers']:
                 st.write("Outliers:")
-                st.table(pd.DataFrame(type_results['short']['outliers']))
+                outliers_df = pd.DataFrame(type_results['short']['outliers'])
+                st.dataframe(outliers_df)
         
         st.write(f"Comparison for {order_type} (Long vs Short)")
-        st.table(pd.Series(type_results['comparison']))
+        comparison_stats = pd.DataFrame(list(type_results['comparison'].items()), 
+                                       columns=['Metric', 'Value'])
+        st.dataframe(comparison_stats)
