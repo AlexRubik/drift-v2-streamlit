@@ -273,6 +273,54 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 # Display the results
                 display_auction_analysis(formatted_results)
                 
+# Auction Slot Difference Dot Plot
+                st.subheader("Auction Slot Difference Over Time")
+                
+                # Create dot plot for auction slot differences
+                slot_fig = px.scatter(
+                    auction_slot_diff_orders_df,
+                    x='ts',
+                    y='auctionSlotDiff',
+                    color='direction',  # Color by long/short direction
+                    hover_data={
+                        'orderId': True,
+                        'user': True,
+                        'orderType': True,
+                        'auctionDuration': True,
+                        'fillPrice': ':.4f',
+                        'auctionStartPrice': ':.4f',
+                        'auctionEndPrice': ':.4f',
+                        'baseAssetAmountFilled': True,
+                        'ts': '|%Y-%m-%d %H:%M:%S'
+                    },
+                    title=f'Auction Slot Differences Over Time for {selected_market}',
+                    labels={
+                        'ts': 'Timestamp',
+                        'auctionSlotDiff': 'Auction Slot Difference',
+                        'direction': 'Order Direction'
+                    }
+                )
+                
+                # Customize the layout
+                slot_fig.update_layout(
+                    xaxis_title="Timestamp",
+                    yaxis_title="Auction Slot Difference",
+                    legend_title="Order Direction",
+                    hovermode='closest'
+                )
+                
+                # Add horizontal line at median slot difference for reference
+                median_slot_diff = auction_slot_diff_orders_df['auctionSlotDiff'].median()
+                slot_fig.add_hline(
+                    y=median_slot_diff, 
+                    line_dash="dash", 
+                    line_color="gray",
+                    annotation_text=f"Median: {median_slot_diff:.0f} slots"
+                )
+                
+                # Display the slot difference chart
+                st.plotly_chart(slot_fig, use_container_width=True)
+                
                 # Price Comparison Chart
                 st.subheader("Price Comparison")
                 
@@ -304,6 +352,8 @@ async def taker_execution_analysis(clearing_house: DriftClient):
                 
                 # Display the chart
                 st.plotly_chart(fig, use_container_width=True)
+                
+                
                 
                 # Calculate and display price difference statistics
                 abs_stats_df, bps_stats_df = price_diff_stats(auction_metrics_df)
