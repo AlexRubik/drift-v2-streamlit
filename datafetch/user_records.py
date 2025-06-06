@@ -721,7 +721,15 @@ def analyze_auction_slots_by_direction(auction_slot_diff_df: pd.DataFrame) -> di
             (group_df['auctionSlotDiff'] < lower_bound) | 
             (group_df['auctionSlotDiff'] > upper_bound)
         ]
-        return outliers
+        # Include user key in outlier records
+        outlier_records = []
+        for _, row in outliers.iterrows():
+            outlier_records.append({
+                'orderId': row['orderId'],
+                'user': row.get('user', 'N/A'),
+                'auctionSlotDiff': row['auctionSlotDiff']
+            })
+        return outlier_records
     
     def calculate_stats(df):
         if df.empty:
@@ -735,7 +743,7 @@ def analyze_auction_slots_by_direction(auction_slot_diff_df: pd.DataFrame) -> di
             'max': df['auctionSlotDiff'].max(),
             'q1': df['auctionSlotDiff'].quantile(0.25),
             'q3': df['auctionSlotDiff'].quantile(0.75),
-            'outliers': get_outliers(df).to_dict('records')
+            'outliers': get_outliers(df)
         }
     
     def compare_groups(group1, group2, name1, name2):
@@ -875,52 +883,51 @@ def format_auction_analysis_results(results: dict) -> dict:
     """
     Formats the auction analysis results into a structured dictionary for display
     """
+    def safe_format_value(value, format_str=".2f", suffix=""):
+        """Safely format a value that might be None, string, or numeric"""
+        if value is None:
+            return "N/A"
+        if isinstance(value, str):
+            return value
+        try:
+            return f"{float(value):{format_str}}{suffix}"
+        except (ValueError, TypeError):
+            return str(value)
+    
     formatted_results = {
         'overall_stats': {
             'long': {
                 'basic_stats': {
                     'Count': results['overall']['long']['count'],
-                    'Mean': f"{results['overall']['long']['mean']:.2f} slots",
-                    'Median': f"{results['overall']['long']['median']:.2f} slots",
-                    'Std Dev': f"{results['overall']['long']['std']:.2f} slots",
-                    'Min': f"{results['overall']['long']['min']:.2f} slots",
-                    'Max': f"{results['overall']['long']['max']:.2f} slots",
-                    'Q1': f"{results['overall']['long']['q1']:.2f} slots",
-                    'Q3': f"{results['overall']['long']['q3']:.2f} slots",
+                    'Mean': safe_format_value(results['overall']['long']['mean'], '.2f', ' slots'),
+                    'Median': safe_format_value(results['overall']['long']['median'], '.2f', ' slots'),
+                    'Std Dev': safe_format_value(results['overall']['long']['std'], '.2f', ' slots'),
+                    'Min': safe_format_value(results['overall']['long']['min'], '.2f', ' slots'),
+                    'Max': safe_format_value(results['overall']['long']['max'], '.2f', ' slots'),
+                    'Q1': safe_format_value(results['overall']['long']['q1'], '.2f', ' slots'),
+                    'Q3': safe_format_value(results['overall']['long']['q3'], '.2f', ' slots'),
                 },
-                'outliers': [
-                    {
-                        'OrderId': outlier['orderId'],
-                        'Slot Diff': outlier['auctionSlotDiff']
-                    }
-                    for outlier in results['overall']['long']['outliers']
-                ]
+                'outliers': results['overall']['long']['outliers']
             },
             'short': {
                 'basic_stats': {
                     'Count': results['overall']['short']['count'],
-                    'Mean': f"{results['overall']['short']['mean']:.2f} slots",
-                    'Median': f"{results['overall']['short']['median']:.2f} slots",
-                    'Std Dev': f"{results['overall']['short']['std']:.2f} slots",
-                    'Min': f"{results['overall']['short']['min']:.2f} slots",
-                    'Max': f"{results['overall']['short']['max']:.2f} slots",
-                    'Q1': f"{results['overall']['short']['q1']:.2f} slots",
-                    'Q3': f"{results['overall']['short']['q3']:.2f} slots",
+                    'Mean': safe_format_value(results['overall']['short']['mean'], '.2f', ' slots'),
+                    'Median': safe_format_value(results['overall']['short']['median'], '.2f', ' slots'),
+                    'Std Dev': safe_format_value(results['overall']['short']['std'], '.2f', ' slots'),
+                    'Min': safe_format_value(results['overall']['short']['min'], '.2f', ' slots'),
+                    'Max': safe_format_value(results['overall']['short']['max'], '.2f', ' slots'),
+                    'Q1': safe_format_value(results['overall']['short']['q1'], '.2f', ' slots'),
+                    'Q3': safe_format_value(results['overall']['short']['q3'], '.2f', ' slots'),
                 },
-                'outliers': [
-                    {
-                        'OrderId': outlier['orderId'],
-                        'Slot Diff': outlier['auctionSlotDiff']
-                    }
-                    for outlier in results['overall']['short']['outliers']
-                ]
+                'outliers': results['overall']['short']['outliers']
             },
             'comparison': {
-                'Mean Difference': f"{results['overall']['comparison']['mean_difference']:.2f} slots",
-                'Median Difference': f"{results['overall']['comparison']['median_difference']:.2f} slots",
-                'Long/Short Ratio': f"{results['overall']['comparison'].get('long_to_short_ratio', 'N/A'):.2f}",
+                'Mean Difference': safe_format_value(results['overall']['comparison']['mean_difference'], '.2f', ' slots'),
+                'Median Difference': safe_format_value(results['overall']['comparison']['median_difference'], '.2f', ' slots'),
+                'Long/Short Ratio': safe_format_value(results['overall']['comparison'].get('long_to_short_ratio', 'N/A'), '.2f'),
                 'Statistically Significant': results['overall']['comparison']['mann_whitney_u_test']['significant_difference'],
-                'P-value': f"{results['overall']['comparison']['mann_whitney_u_test']['p_value']:.4f}"
+                'P-value': safe_format_value(results['overall']['comparison']['mann_whitney_u_test']['p_value'], '.4f')
             }
         },
         'by_order_type': {}
@@ -932,47 +939,35 @@ def format_auction_analysis_results(results: dict) -> dict:
             'long': {
                 'basic_stats': {
                     'Count': type_results['long']['count'],
-                    'Mean': f"{type_results['long']['mean']:.2f} slots",
-                    'Median': f"{type_results['long']['median']:.2f} slots",
-                    'Std Dev': f"{type_results['long']['std']:.2f} slots",
-                    'Min': f"{type_results['long']['min']:.2f} slots",
-                    'Max': f"{type_results['long']['max']:.2f} slots",
-                    'Q1': f"{type_results['long']['q1']:.2f} slots",
-                    'Q3': f"{type_results['long']['q3']:.2f} slots",
+                    'Mean': safe_format_value(type_results['long']['mean'], '.2f', ' slots'),
+                    'Median': safe_format_value(type_results['long']['median'], '.2f', ' slots'),
+                    'Std Dev': safe_format_value(type_results['long']['std'], '.2f', ' slots'),
+                    'Min': safe_format_value(type_results['long']['min'], '.2f', ' slots'),
+                    'Max': safe_format_value(type_results['long']['max'], '.2f', ' slots'),
+                    'Q1': safe_format_value(type_results['long']['q1'], '.2f', ' slots'),
+                    'Q3': safe_format_value(type_results['long']['q3'], '.2f', ' slots'),
                 },
-                'outliers': [
-                    {
-                        'OrderId': outlier['orderId'],
-                        'Slot Diff': outlier['auctionSlotDiff']
-                    }
-                    for outlier in type_results['long']['outliers']
-                ]
+                'outliers': type_results['long']['outliers']
             },
             'short': {
                 'basic_stats': {
                     'Count': type_results['short']['count'],
-                    'Mean': f"{type_results['short']['mean']:.2f} slots",
-                    'Median': f"{type_results['short']['median']:.2f} slots",
-                    'Std Dev': f"{type_results['short']['std']:.2f} slots",
-                    'Min': f"{type_results['short']['min']:.2f} slots",
-                    'Max': f"{type_results['short']['max']:.2f} slots",
-                    'Q1': f"{type_results['short']['q1']:.2f} slots",
-                    'Q3': f"{type_results['short']['q3']:.2f} slots",
+                    'Mean': safe_format_value(type_results['short']['mean'], '.2f', ' slots'),
+                    'Median': safe_format_value(type_results['short']['median'], '.2f', ' slots'),
+                    'Std Dev': safe_format_value(type_results['short']['std'], '.2f', ' slots'),
+                    'Min': safe_format_value(type_results['short']['min'], '.2f', ' slots'),
+                    'Max': safe_format_value(type_results['short']['max'], '.2f', ' slots'),
+                    'Q1': safe_format_value(type_results['short']['q1'], '.2f', ' slots'),
+                    'Q3': safe_format_value(type_results['short']['q3'], '.2f', ' slots'),
                 },
-                'outliers': [
-                    {
-                        'OrderId': outlier['orderId'],
-                        'Slot Diff': outlier['auctionSlotDiff']
-                    }
-                    for outlier in type_results['short']['outliers']
-                ]
+                'outliers': type_results['short']['outliers']
             },
             'comparison': {
-                'Mean Difference': f"{type_results['comparison']['mean_difference']:.2f} slots",
-                'Median Difference': f"{type_results['comparison']['median_difference']:.2f} slots",
-                'Long/Short Ratio': f"{type_results['comparison'].get('long_to_short_ratio', 'N/A'):.2f}" if 'long_to_short_ratio' in type_results['comparison'] else 'N/A',
+                'Mean Difference': safe_format_value(type_results['comparison']['mean_difference'], '.2f', ' slots'),
+                'Median Difference': safe_format_value(type_results['comparison']['median_difference'], '.2f', ' slots'),
+                'Long/Short Ratio': safe_format_value(type_results['comparison'].get('long_to_short_ratio', 'N/A'), '.2f') if 'long_to_short_ratio' in type_results['comparison'] else 'N/A',
                 'Statistically Significant': type_results['comparison']['mann_whitney_u_test']['significant_difference'] if 'mann_whitney_u_test' in type_results['comparison'] else 'N/A',
-                'P-value': f"{type_results['comparison']['mann_whitney_u_test']['p_value']:.4f}" if 'mann_whitney_u_test' in type_results['comparison'] else 'N/A'
+                'P-value': safe_format_value(type_results['comparison']['mann_whitney_u_test']['p_value'], '.4f') if 'mann_whitney_u_test' in type_results['comparison'] else 'N/A'
             }
         }
 
@@ -1130,3 +1125,314 @@ def get_multiple_users_orders_and_actions(
         aggregated_auction_slot_diff_df,
         aggregated_auction_metrics_df
     )
+
+def analyze_auction_price_differences_by_direction(auction_slot_diff_df: pd.DataFrame) -> dict:
+    """
+    Analyzes auction price differences for long and short positions to determine if auctions are too aggressive or passive.
+    
+    This function helps answer:
+    - Are auctions filling closer to start price (passive) or end price (aggressive)?
+    - Do longs/shorts typically fill within expected ranges from oracle?
+    - Are auction parameters appropriately calibrated for each direction?
+    
+    Args:
+        auction_slot_diff_df: DataFrame containing auction slot difference data with price columns
+        
+    Returns:
+        Dictionary containing comprehensive price difference analysis for both directions
+    """
+    def calculate_price_stats(df, price_diff_columns):
+        """Calculate statistics for price difference columns"""
+        if df.empty:
+            return {}
+        
+        stats = {}
+        for col in price_diff_columns:
+            if col in df.columns:
+                series = df[col]
+                stats[col] = {
+                    'count': len(series),
+                    'mean': series.mean(),
+                    'median': series.median(),
+                    'std': series.std(),
+                    'min': series.min(),
+                    'max': series.max(),
+                    'q1': series.quantile(0.25),
+                    'q3': series.quantile(0.75),
+                    'percentile_90': series.quantile(0.90),
+                    'percentile_95': series.quantile(0.95)
+                }
+        return stats
+    
+    def analyze_auction_aggressiveness(df):
+        """Analyze whether auctions are filling closer to start (passive) or end (aggressive) prices"""
+        if df.empty or 'auctionStart_vs_fill' not in df.columns or 'auctionEnd_vs_fill' not in df.columns:
+            return {}
+        
+        # Calculate how often fills are closer to start vs end price
+        closer_to_start = (df['auctionStart_vs_fill'] < df['auctionEnd_vs_fill']).sum()
+        closer_to_end = (df['auctionEnd_vs_fill'] < df['auctionStart_vs_fill']).sum()
+        equal_distance = (df['auctionStart_vs_fill'] == df['auctionEnd_vs_fill']).sum()
+        
+        total_orders = len(df)
+        
+        # Calculate average distances
+        avg_distance_to_start = df['auctionStart_vs_fill'].mean()
+        avg_distance_to_end = df['auctionEnd_vs_fill'].mean()
+        
+        # Determine overall tendency
+        if closer_to_start > closer_to_end:
+            tendency = "PASSIVE"
+            tendency_strength = (closer_to_start / total_orders) * 100
+        elif closer_to_end > closer_to_start:
+            tendency = "AGGRESSIVE"
+            tendency_strength = (closer_to_end / total_orders) * 100
+        else:
+            tendency = "BALANCED"
+            tendency_strength = 50.0
+        
+        return {
+            'closer_to_start_count': closer_to_start,
+            'closer_to_end_count': closer_to_end,
+            'equal_distance_count': equal_distance,
+            'closer_to_start_pct': (closer_to_start / total_orders) * 100,
+            'closer_to_end_pct': (closer_to_end / total_orders) * 100,
+            'equal_distance_pct': (equal_distance / total_orders) * 100,
+            'avg_distance_to_start': avg_distance_to_start,
+            'avg_distance_to_end': avg_distance_to_end,
+            'tendency': tendency,
+            'tendency_strength_pct': tendency_strength,
+            'aggressiveness_ratio': avg_distance_to_start / avg_distance_to_end if avg_distance_to_end != 0 else float('inf')
+        }
+    
+    def analyze_oracle_deviation(df):
+        """Analyze how far fills deviate from oracle price"""
+        if df.empty or 'oracle_vs_fill_bps' not in df.columns:
+            return {}
+        
+        oracle_diffs = df['oracle_vs_fill_bps']
+        
+        # Define thresholds for analysis (in basis points)
+        very_close_threshold = 5  # within 5 bps
+        close_threshold = 10      # within 10 bps
+        reasonable_threshold = 25 # within 25 bps
+        far_threshold = 50        # within 50 bps
+        
+        very_close = (oracle_diffs <= very_close_threshold).sum()
+        close = (oracle_diffs <= close_threshold).sum()
+        reasonable = (oracle_diffs <= reasonable_threshold).sum()
+        far = (oracle_diffs <= far_threshold).sum()
+        very_far = (oracle_diffs > far_threshold).sum()
+        
+        total = len(oracle_diffs)
+        
+        # Find outliers in oracle deviation (orders with very high deviations)
+        q3 = oracle_diffs.quantile(0.75)
+        iqr = oracle_diffs.quantile(0.75) - oracle_diffs.quantile(0.25)
+        upper_bound = q3 + (1.5 * iqr)
+        outlier_mask = oracle_diffs > upper_bound
+        
+        outlier_records = []
+        if outlier_mask.any():
+            outlier_df = df[outlier_mask]
+            for _, row in outlier_df.iterrows():
+                outlier_records.append({
+                    'orderId': row['orderId'],
+                    'user': row.get('user', 'N/A'),
+                    'oracle_vs_fill_bps': row['oracle_vs_fill_bps']
+                })
+        
+        return {
+            'very_close_to_oracle_count': very_close,
+            'close_to_oracle_count': close,
+            'reasonable_from_oracle_count': reasonable,
+            'far_from_oracle_count': far,
+            'very_far_from_oracle_count': very_far,
+            'very_close_to_oracle_pct': (very_close / total) * 100,
+            'close_to_oracle_pct': (close / total) * 100,
+            'reasonable_from_oracle_pct': (reasonable / total) * 100,
+            'far_from_oracle_pct': (far / total) * 100,
+            'very_far_from_oracle_pct': (very_far / total) * 100,
+            'avg_oracle_deviation_bps': oracle_diffs.mean(),
+            'median_oracle_deviation_bps': oracle_diffs.median(),
+            'max_oracle_deviation_bps': oracle_diffs.max(),
+            'oracle_deviation_quality': 'EXCELLENT' if oracle_diffs.mean() <= 10 else 
+                                      'GOOD' if oracle_diffs.mean() <= 25 else
+                                      'FAIR' if oracle_diffs.mean() <= 50 else 'POOR',
+            'oracle_deviation_outliers': outlier_records
+        }
+    
+    # Initialize results dictionary
+    results = {
+        'summary': {},
+        'long_analysis': {},
+        'short_analysis': {},
+        'comparison': {},
+        'recommendations': []
+    }
+    
+    # Overall summary
+    total_orders = len(auction_slot_diff_df)
+    long_orders = auction_slot_diff_df[auction_slot_diff_df['direction'] == 'long']
+    short_orders = auction_slot_diff_df[auction_slot_diff_df['direction'] == 'short']
+    
+    results['summary'] = {
+        'total_orders': total_orders,
+        'long_orders_count': len(long_orders),
+        'short_orders_count': len(short_orders),
+        'long_orders_pct': (len(long_orders) / total_orders) * 100 if total_orders > 0 else 0,
+        'short_orders_pct': (len(short_orders) / total_orders) * 100 if total_orders > 0 else 0
+    }
+    
+    # Price difference columns to analyze
+    price_diff_columns = [
+        'auctionStart_vs_fill', 'auctionEnd_vs_fill', 'oracle_vs_fill',
+        'auctionStart_vs_fill_bps', 'auctionEnd_vs_fill_bps', 'oracle_vs_fill_bps'
+    ]
+    
+    # Analyze long orders
+    if not long_orders.empty:
+        results['long_analysis'] = {
+            'price_difference_stats': calculate_price_stats(long_orders, price_diff_columns),
+            'auction_aggressiveness': analyze_auction_aggressiveness(long_orders),
+            'oracle_deviation': analyze_oracle_deviation(long_orders)
+        }
+    
+    # Analyze short orders
+    if not short_orders.empty:
+        results['short_analysis'] = {
+            'price_difference_stats': calculate_price_stats(short_orders, price_diff_columns),
+            'auction_aggressiveness': analyze_auction_aggressiveness(short_orders),
+            'oracle_deviation': analyze_oracle_deviation(short_orders)
+        }
+    
+    # Comparison between long and short
+    if not long_orders.empty and not short_orders.empty:
+        long_oracle_avg = long_orders['oracle_vs_fill_bps'].mean() if 'oracle_vs_fill_bps' in long_orders.columns else 0
+        short_oracle_avg = short_orders['oracle_vs_fill_bps'].mean() if 'oracle_vs_fill_bps' in short_orders.columns else 0
+        
+        long_start_avg = long_orders['auctionStart_vs_fill_bps'].mean() if 'auctionStart_vs_fill_bps' in long_orders.columns else 0
+        short_start_avg = short_orders['auctionStart_vs_fill_bps'].mean() if 'auctionStart_vs_fill_bps' in short_orders.columns else 0
+        
+        long_end_avg = long_orders['auctionEnd_vs_fill_bps'].mean() if 'auctionEnd_vs_fill_bps' in long_orders.columns else 0
+        short_end_avg = short_orders['auctionEnd_vs_fill_bps'].mean() if 'auctionEnd_vs_fill_bps' in short_orders.columns else 0
+        
+        results['comparison'] = {
+            'oracle_deviation_diff_bps': long_oracle_avg - short_oracle_avg,
+            'start_price_diff_bps': long_start_avg - short_start_avg,
+            'end_price_diff_bps': long_end_avg - short_end_avg,
+            'long_oracle_avg_bps': long_oracle_avg,
+            'short_oracle_avg_bps': short_oracle_avg,
+            'long_more_accurate_to_oracle': long_oracle_avg < short_oracle_avg,
+            'directional_bias': 'LONG_FAVORED' if long_oracle_avg < short_oracle_avg else 'SHORT_FAVORED'
+        }
+    
+    # Generate recommendations
+    recommendations = []
+    
+    # Oracle deviation recommendations
+    if 'long_analysis' in results and 'oracle_deviation' in results['long_analysis']:
+        long_oracle_quality = results['long_analysis']['oracle_deviation'].get('oracle_deviation_quality', 'UNKNOWN')
+        if long_oracle_quality in ['FAIR', 'POOR']:
+            recommendations.append(f"LONG orders: Oracle deviation is {long_oracle_quality} - consider tightening auction parameters")
+    
+    if 'short_analysis' in results and 'oracle_deviation' in results['short_analysis']:
+        short_oracle_quality = results['short_analysis']['oracle_deviation'].get('oracle_deviation_quality', 'UNKNOWN')
+        if short_oracle_quality in ['FAIR', 'POOR']:
+            recommendations.append(f"SHORT orders: Oracle deviation is {short_oracle_quality} - consider tightening auction parameters")
+    
+    # Aggressiveness recommendations
+    if 'long_analysis' in results and 'auction_aggressiveness' in results['long_analysis']:
+        long_tendency = results['long_analysis']['auction_aggressiveness'].get('tendency', '')
+        long_strength = results['long_analysis']['auction_aggressiveness'].get('tendency_strength_pct', 0)
+        if 'PASSIVE' in long_tendency and long_strength > 70:
+            recommendations.append("LONG orders: Auctions are too passive (filling too close to start price) - consider more aggressive pricing")
+        elif 'AGGRESSIVE' in long_tendency and long_strength > 70:
+            recommendations.append("LONG orders: Auctions are too aggressive (filling too close to end price) - consider more conservative pricing")
+    
+    if 'short_analysis' in results and 'auction_aggressiveness' in results['short_analysis']:
+        short_tendency = results['short_analysis']['auction_aggressiveness'].get('tendency', '')
+        short_strength = results['short_analysis']['auction_aggressiveness'].get('tendency_strength_pct', 0)
+        if 'PASSIVE' in short_tendency and short_strength > 70:
+            recommendations.append("SHORT orders: Auctions are too passive (filling too close to start price) - consider more aggressive pricing")
+        elif 'AGGRESSIVE' in short_tendency and short_strength > 70:
+            recommendations.append("SHORT orders: Auctions are too aggressive (filling too close to end price) - consider more conservative pricing")
+    
+    # Directional bias recommendations
+    if 'comparison' in results and 'directional_bias' in results['comparison']:
+        oracle_diff = abs(results['comparison'].get('oracle_deviation_diff_bps', 0))
+        if oracle_diff > 10:  # More than 10 bps difference
+            bias = results['comparison']['directional_bias']
+            recommendations.append(f"Directional bias detected: {bias} orders perform better - consider asymmetric auction parameters")
+    
+    results['recommendations'] = recommendations
+    
+    # Print detailed analysis
+    print("\n" + "="*80)
+    print("AUCTION PRICE DIFFERENCE ANALYSIS BY DIRECTION")
+    print("="*80)
+    
+    print(f"\nSUMMARY:")
+    print(f"Total Orders: {results['summary']['total_orders']}")
+    print(f"Long Orders: {results['summary']['long_orders_count']} ({results['summary']['long_orders_pct']:.1f}%)")
+    print(f"Short Orders: {results['summary']['short_orders_count']} ({results['summary']['short_orders_pct']:.1f}%)")
+    
+    # Print long analysis
+    if 'long_analysis' in results:
+        print(f"\nLONG ORDERS ANALYSIS:")
+        if 'oracle_deviation' in results['long_analysis']:
+            oracle_data = results['long_analysis']['oracle_deviation']
+            print(f"  Oracle Deviation Quality: {oracle_data.get('oracle_deviation_quality', 'N/A')}")
+            print(f"  Average Oracle Deviation: {oracle_data.get('avg_oracle_deviation_bps', 0):.2f} bps")
+            print(f"  Median Oracle Deviation: {oracle_data.get('median_oracle_deviation_bps', 0):.2f} bps")
+            print(f"  Within 10 bps of Oracle: {oracle_data.get('close_to_oracle_pct', 0):.1f}%")
+            print(f"  Within 25 bps of Oracle: {oracle_data.get('reasonable_from_oracle_pct', 0):.1f}%")
+        
+        if 'auction_aggressiveness' in results['long_analysis']:
+            agg_data = results['long_analysis']['auction_aggressiveness']
+            print(f"  Auction Tendency: {agg_data.get('tendency', 'N/A')} ({agg_data.get('tendency_strength_pct', 0):.1f}%)")
+            print(f"  Closer to Start Price: {agg_data.get('closer_to_start_pct', 0):.1f}%")
+            print(f"  Closer to End Price: {agg_data.get('closer_to_end_pct', 0):.1f}%")
+            print(f"  Avg Distance to Start: {agg_data.get('avg_distance_to_start', 0):.4f}")
+            print(f"  Avg Distance to End: {agg_data.get('avg_distance_to_end', 0):.4f}")
+    
+    # Print short analysis
+    if 'short_analysis' in results:
+        print(f"\nSHORT ORDERS ANALYSIS:")
+        if 'oracle_deviation' in results['short_analysis']:
+            oracle_data = results['short_analysis']['oracle_deviation']
+            print(f"  Oracle Deviation Quality: {oracle_data.get('oracle_deviation_quality', 'N/A')}")
+            print(f"  Average Oracle Deviation: {oracle_data.get('avg_oracle_deviation_bps', 0):.2f} bps")
+            print(f"  Median Oracle Deviation: {oracle_data.get('median_oracle_deviation_bps', 0):.2f} bps")
+            print(f"  Within 10 bps of Oracle: {oracle_data.get('close_to_oracle_pct', 0):.1f}%")
+            print(f"  Within 25 bps of Oracle: {oracle_data.get('reasonable_from_oracle_pct', 0):.1f}%")
+        
+        if 'auction_aggressiveness' in results['short_analysis']:
+            agg_data = results['short_analysis']['auction_aggressiveness']
+            print(f"  Auction Tendency: {agg_data.get('tendency', 'N/A')} ({agg_data.get('tendency_strength_pct', 0):.1f}%)")
+            print(f"  Closer to Start Price: {agg_data.get('closer_to_start_pct', 0):.1f}%")
+            print(f"  Closer to End Price: {agg_data.get('closer_to_end_pct', 0):.1f}%")
+            print(f"  Avg Distance to Start: {agg_data.get('avg_distance_to_start', 0):.4f}")
+            print(f"  Avg Distance to End: {agg_data.get('avg_distance_to_end', 0):.4f}")
+    
+    # Print comparison
+    if 'comparison' in results:
+        print(f"\nLONG vs SHORT COMPARISON:")
+        comp_data = results['comparison']
+        print(f"  Directional Bias: {comp_data.get('directional_bias', 'N/A')}")
+        print(f"  Long Avg Oracle Deviation: {comp_data.get('long_oracle_avg_bps', 0):.2f} bps")
+        print(f"  Short Avg Oracle Deviation: {comp_data.get('short_oracle_avg_bps', 0):.2f} bps")
+        print(f"  Oracle Deviation Difference: {comp_data.get('oracle_deviation_diff_bps', 0):.2f} bps")
+        print(f"  Long More Accurate to Oracle: {comp_data.get('long_more_accurate_to_oracle', False)}")
+    
+    # Print recommendations
+    if results['recommendations']:
+        print(f"\nRECOMMENDATIONS:")
+        for i, rec in enumerate(results['recommendations'], 1):
+            print(f"  {i}. {rec}")
+    else:
+        print(f"\nRECOMMENDATIONS: No specific recommendations - auction parameters appear well-calibrated")
+    
+    print("="*80)
+    
+    return results
