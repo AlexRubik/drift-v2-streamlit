@@ -651,7 +651,27 @@ def get_user_orders_and_actions(
             for col in price_columns:
                 auction_slot_diff_df[col] = auction_slot_diff_df[col].astype(float)
             
-            # Calculate absolute price differences
+            # For oracle order types, convert relative offsets to absolute prices
+            # auctionStartPrice and auctionEndPrice are offsets relative to oraclePrice for oracle orders
+            oracle_orders_mask = auction_slot_diff_df['orderType'] == 'oracle'
+            if oracle_orders_mask.any():
+                print(f"Converting {oracle_orders_mask.sum()} oracle orders from relative to absolute prices...")
+                
+                # Convert auction start price: offset + oracle price = absolute price
+                auction_slot_diff_df.loc[oracle_orders_mask, 'auctionStartPrice'] = (
+                    auction_slot_diff_df.loc[oracle_orders_mask, 'auctionStartPrice'] + 
+                    auction_slot_diff_df.loc[oracle_orders_mask, 'oraclePrice']
+                )
+                
+                # Convert auction end price: offset + oracle price = absolute price
+                auction_slot_diff_df.loc[oracle_orders_mask, 'auctionEndPrice'] = (
+                    auction_slot_diff_df.loc[oracle_orders_mask, 'auctionEndPrice'] + 
+                    auction_slot_diff_df.loc[oracle_orders_mask, 'oraclePrice']
+                )
+                
+                print("Converted oracle order auction prices from relative offsets to absolute prices")
+            
+            # Calculate absolute price differences (now using corrected absolute prices for oracle orders)
             auction_slot_diff_df['auctionStart_vs_fill'] = abs(auction_slot_diff_df['auctionStartPrice'] - auction_slot_diff_df['fillPrice'])
             auction_slot_diff_df['auctionEnd_vs_fill'] = abs(auction_slot_diff_df['auctionEndPrice'] - auction_slot_diff_df['fillPrice'])
             auction_slot_diff_df['oracle_vs_fill'] = abs(auction_slot_diff_df['oraclePrice'] - auction_slot_diff_df['fillPrice'])
