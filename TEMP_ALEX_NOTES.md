@@ -27,13 +27,14 @@ oracle vs market order breakdown valuable too, but what to see how longs/shorts 
 ### Comments
 
 TODO:
-- account for oracle records that use price offset?
+
 
 Suggestions:
 - New endpoint to fetch orders in time range
 - New endpoint to fetch order actions in time range
 - New endpoint to fetch joined order and order action data in time range
 - Add oraclePrice field to output of data mentioned above
+- Display the correct prices for oracle limit orders. Right now the api gives the offset, not the actual price
 
 -----------------
 If we want ALL auction data and not a specified user's data only:
